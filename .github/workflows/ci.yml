@@ -24,7 +24,7 @@ jobs:
           cache: pip
 
       - name: Install ESPHome
-        run: pip install esphome
+        run: pip install -r requirements.txt
 
       - name: Compile test firmware
         run: esphome compile tests/test.${{ matrix.transport }}.yaml
