@@ -19,9 +19,11 @@ class MediaPlayerHandler : public DomainHandler {
   void append_entity_ids(JsonArray arr) const override;
   void append_domain_info(JsonObject obj) const override;
   void append_entity_discovery(JsonArray arr) const override;
+  void append_telemetry_fields(EntityBase *obj,
+                               const TelemetryEmit &emit) override;
 
  protected:
-  static std::string build_state_json(media_player::MediaPlayer *obj);
+  std::string build_state_json(media_player::MediaPlayer *obj);
 };
 
 }  // namespace thingsboard

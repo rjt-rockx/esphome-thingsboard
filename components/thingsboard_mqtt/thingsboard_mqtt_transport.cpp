@@ -26,6 +26,48 @@ static const char *const ATTRIBUTE_REQUEST_TOPIC_PREFIX = "v1/devices/me/attribu
 static const char *const ATTRIBUTE_RESPONSE_SUB_TOPIC = "v1/devices/me/attributes/response/+";
 static const char *const PROVISION_TOPIC = "/provision";
 
+bool ThingsBoardMQTT::tls_enabled_() const {
+  return this->use_x509_ || !this->server_ca_pem_.empty();
+}
+
+void ThingsBoardMQTT::apply_broker_address_(esp_mqtt_client_config_t &cfg) const {
+  // ESP-MQTT honours the URI scheme only when broker.address.uri is set; using
+  // the discrete hostname/port/transport fields is the SDK-recommended path
+  // (mirrors references/thingsboard-client-sdk/src/Espressif_MQTT_Client.h:263).
+  cfg.broker.address.hostname = this->broker_host_.c_str();
+  cfg.broker.address.port = this->broker_port_;
+  cfg.broker.address.transport = this->tls_enabled_()
+                                     ? MQTT_TRANSPORT_OVER_SSL
+                                     : MQTT_TRANSPORT_OVER_TCP;
+}
+
+void ThingsBoardMQTT::apply_credentials_(esp_mqtt_client_config_t &cfg) const {
+  if (this->use_x509_) {
+    if (!this->server_ca_pem_.empty()) {
+      cfg.broker.verification.certificate = this->server_ca_pem_.c_str();
+    }
+    cfg.credentials.authentication.certificate = this->client_cert_pem_.c_str();
+    cfg.credentials.authentication.key = this->client_key_pem_.c_str();
+    cfg.credentials.client_id =
+        this->client_id_.empty() ? nullptr : this->client_id_.c_str();
+  } else if (this->use_basic_) {
+    if (!this->server_ca_pem_.empty()) {
+      cfg.broker.verification.certificate = this->server_ca_pem_.c_str();
+    }
+    cfg.credentials.client_id = this->basic_client_id_.c_str();
+    cfg.credentials.username = this->basic_username_.c_str();
+    cfg.credentials.authentication.password = this->basic_password_.c_str();
+  } else {
+    if (!this->server_ca_pem_.empty()) {
+      cfg.broker.verification.certificate = this->server_ca_pem_.c_str();
+    }
+    // ACCESS_TOKEN auth: device token is the MQTT username.
+    cfg.credentials.username = this->device_token_.c_str();
+    cfg.credentials.client_id =
+        this->client_id_.empty() ? nullptr : this->client_id_.c_str();
+  }
+}
+
 ThingsBoardMQTT::ThingsBoardMQTT() {}
 
 ThingsBoardMQTT::~ThingsBoardMQTT() {
@@ -67,8 +109,15 @@ void ThingsBoardMQTT::set_username(const std::string &username) {
 }
 
 bool ThingsBoardMQTT::connect() {
-  if (this->broker_host_.empty() || this->device_token_.empty()) {
-    ESP_LOGE(TAG, "MQTT broker host or device token not set");
+  if (this->broker_host_.empty()) {
+    ESP_LOGE(TAG, "MQTT broker host not set");
+    return false;
+  }
+  // X.509 mTLS authenticates via client certificate, so a device token isn't
+  // required. MQTT_BASIC has its own credentials. Only bare ACCESS_TOKEN auth
+  // needs the token at this point.
+  if (!this->use_x509_ && !this->use_basic_ && this->device_token_.empty()) {
+    ESP_LOGE(TAG, "MQTT device token not set (ACCESS_TOKEN auth requires it)");
     return false;
   }
 
@@ -80,10 +129,8 @@ bool ThingsBoardMQTT::connect() {
     if (this->pushed_username_ != this->device_token_) {
       ESP_LOGI(TAG, "Device token rotated, pushing new MQTT credentials");
       esp_mqtt_client_config_t mqtt_cfg = {};
-      mqtt_cfg.broker.address.uri = this->broker_uri_.c_str();
-      mqtt_cfg.credentials.username = this->device_token_.c_str();
-      mqtt_cfg.credentials.client_id =
-          this->client_id_.empty() ? nullptr : this->client_id_.c_str();
+      this->apply_broker_address_(mqtt_cfg);
+      this->apply_credentials_(mqtt_cfg);
       mqtt_cfg.network.timeout_ms = 10000;
       mqtt_cfg.session.keepalive = 60;
       mqtt_cfg.buffer.size = 4 * 1024;
@@ -101,30 +148,14 @@ bool ThingsBoardMQTT::connect() {
 
   this->provisioning_mode_ = false;
 
-  ESP_LOGI(TAG, "Connecting to ThingsBoard MQTT broker: %s:%d", this->broker_host_.c_str(), this->broker_port_);
+  ESP_LOGI(TAG, "Connecting to ThingsBoard MQTT broker: %s:%d (%s)",
+           this->broker_host_.c_str(), this->broker_port_,
+           this->tls_enabled_() ? "TLS" : "plaintext");
   ESP_LOGI(TAG, "Using device token: %s", this->device_token_.c_str());
 
-  // URI stored as a member to keep the c_str() alive past this call.
-  this->broker_uri_ = "mqtt://" + this->broker_host_ + ":" + std::to_string(this->broker_port_);
-
   esp_mqtt_client_config_t mqtt_cfg = {};
-  mqtt_cfg.broker.address.uri = this->broker_uri_.c_str();
-  if (this->use_x509_) {
-    mqtt_cfg.broker.verification.certificate = this->server_ca_pem_.empty()
-                                                   ? nullptr
-                                                   : this->server_ca_pem_.c_str();
-    mqtt_cfg.credentials.authentication.certificate = this->client_cert_pem_.c_str();
-    mqtt_cfg.credentials.authentication.key = this->client_key_pem_.c_str();
-    mqtt_cfg.credentials.client_id = this->client_id_.empty() ? nullptr : this->client_id_.c_str();
-  } else if (this->use_basic_) {
-    mqtt_cfg.credentials.client_id = this->basic_client_id_.c_str();
-    mqtt_cfg.credentials.username = this->basic_username_.c_str();
-    mqtt_cfg.credentials.authentication.password = this->basic_password_.c_str();
-  } else {
-    // ACCESS_TOKEN auth: device token is the MQTT username.
-    mqtt_cfg.credentials.username = this->device_token_.c_str();
-    mqtt_cfg.credentials.client_id = this->client_id_.empty() ? nullptr : this->client_id_.c_str();
-  }
+  this->apply_broker_address_(mqtt_cfg);
+  this->apply_credentials_(mqtt_cfg);
   mqtt_cfg.network.timeout_ms = 10000;
   mqtt_cfg.session.keepalive = 60;
   // Must fit a full OTA chunk (chunk_size=4096) plus topic+MQTT framing.
@@ -132,9 +163,10 @@ bool ThingsBoardMQTT::connect() {
   // fragmented chunks rather than reassemble (see MQTT_EVENT_DATA handler).
   mqtt_cfg.buffer.size = 8 * 1024;
 
-  ESP_LOGD(TAG, "MQTT config: buffer_size=%d, timeout=%d, keepalive=%d, auth=%s",
+  ESP_LOGD(TAG, "MQTT config: buffer_size=%d, timeout=%d, keepalive=%d, auth=%s, transport=%s",
            mqtt_cfg.buffer.size, mqtt_cfg.network.timeout_ms, mqtt_cfg.session.keepalive,
-           this->use_x509_ ? "X509" : this->use_basic_ ? "MQTT_BASIC" : "ACCESS_TOKEN");
+           this->use_x509_ ? "X509" : this->use_basic_ ? "MQTT_BASIC" : "ACCESS_TOKEN",
+           this->tls_enabled_() ? "TLS" : "TCP");
 
   this->mqtt_client_ = esp_mqtt_client_init(&mqtt_cfg);
   if (this->mqtt_client_ == nullptr) {
@@ -167,15 +199,19 @@ bool ThingsBoardMQTT::connect_for_provisioning() {
     return false;
   }
 
-  ESP_LOGI(TAG, "Connecting to ThingsBoard MQTT broker for provisioning: %s:%d",
-           this->broker_host_.c_str(), this->broker_port_);
+  ESP_LOGI(TAG, "Connecting to ThingsBoard MQTT broker for provisioning: %s:%d (%s)",
+           this->broker_host_.c_str(), this->broker_port_,
+           this->tls_enabled_() ? "TLS" : "plaintext");
 
   this->provisioning_mode_ = true;
 
-  this->broker_uri_ = "mqtt://" + this->broker_host_ + ":" + std::to_string(this->broker_port_);
-
   esp_mqtt_client_config_t mqtt_cfg = {};
-  mqtt_cfg.broker.address.uri = this->broker_uri_.c_str();
+  this->apply_broker_address_(mqtt_cfg);
+  // Provisioning is access-token-style (username="provision"); we still want the
+  // server CA to apply if the YAML configured TLS for the production session.
+  if (!this->server_ca_pem_.empty()) {
+    mqtt_cfg.broker.verification.certificate = this->server_ca_pem_.c_str();
+  }
   // Per TB MQTT API: username must be "provision" for the provisioning session.
   mqtt_cfg.credentials.username = "provision";
   mqtt_cfg.credentials.client_id = this->client_id_.empty() ? "provision" : this->client_id_.c_str();

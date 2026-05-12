@@ -31,6 +31,7 @@ CONF_CREDENTIALS_TYPE = "type"
 CONF_ACCESS_TOKEN = "access_token"
 CONF_CERTIFICATE_PEM = "certificate_pem"
 CONF_PRIVATE_KEY_PEM = "private_key_pem"
+CONF_SERVER_CA_PEM = "server_ca_pem"
 
 thingsboard_mqtt_ns = cg.esphome_ns.namespace("thingsboard_mqtt")
 
@@ -70,19 +71,34 @@ PROVISIONING_SCHEMA = cv.Schema(
 
 # If both device_token and provisioning are set, device_token is preferred;
 # provisioning is the fallback on auth failure.
+#
+# Port intentionally has no default so to_code can pick 8883 vs 1883 from
+# whether TLS material was supplied.
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(CONF_THINGSBOARD_ID): cv.use_id(tb_core.ThingsBoardComponent),
             cv.Required(CONF_BROKER): cv.string,
-            cv.Optional(CONF_PORT, default=1883): cv.port,
+            cv.Optional(CONF_PORT): cv.port,
             cv.Optional(CONF_DEVICE_TOKEN): cv.string,
             cv.Optional(CONF_PROVISIONING): PROVISIONING_SCHEMA,
             cv.Optional(CONF_CREDENTIALS): _credentials_schema(allow_token=False),
+            # Optional server-CA pin. Set to enable TLS without mTLS (paired
+            # with ACCESS_TOKEN or MQTT_BASIC).
+            cv.Optional(CONF_SERVER_CA_PEM): cv.string,
         }
     ),
     cv.has_at_least_one_key(CONF_DEVICE_TOKEN, CONF_PROVISIONING, CONF_CREDENTIALS),
 )
+
+
+def _tls_configured(config):
+    if CONF_SERVER_CA_PEM in config:
+        return True
+    creds = config.get(CONF_CREDENTIALS)
+    if creds and creds.get(CONF_CREDENTIALS_TYPE) == CREDENTIAL_X509:
+        return True
+    return False
 
 
 @coroutine_with_priority(0.9)
@@ -98,7 +114,42 @@ async def to_code(config):
     tb = await cg.get_variable(config[CONF_THINGSBOARD_ID])
 
     cg.add(tb.set_mqtt_broker(config[CONF_BROKER]))
-    cg.add(tb.set_mqtt_port(config[CONF_PORT]))
+    port = config.get(CONF_PORT)
+    if port is None:
+        port = 8883 if _tls_configured(config) else 1883
+    cg.add(tb.set_mqtt_port(port))
+
+    if CONF_SERVER_CA_PEM in config:
+        cg.add(tb.set_mqtt_server_ca(config[CONF_SERVER_CA_PEM]))
+
+    if CONF_CREDENTIALS in config:
+        creds = config[CONF_CREDENTIALS]
+        ctype = creds[CONF_CREDENTIALS_TYPE]
+        if ctype == CREDENTIAL_MQTT_BASIC:
+            cg.add(
+                tb.set_mqtt_basic_credentials(
+                    creds.get(CONF_CLIENT_ID, ""),
+                    creds.get(CONF_USERNAME, ""),
+                    creds.get(CONF_PASSWORD, ""),
+                )
+            )
+        elif ctype == CREDENTIAL_X509:
+            if (
+                CONF_CERTIFICATE_PEM not in creds
+                or CONF_PRIVATE_KEY_PEM not in creds
+            ):
+                raise cv.Invalid(
+                    "thingsboard_mqtt: X509_CERTIFICATE credentials require "
+                    "both certificate_pem and private_key_pem."
+                )
+            cg.add(
+                tb.set_mqtt_client_certificate(
+                    creds[CONF_CERTIFICATE_PEM],
+                    creds[CONF_PRIVATE_KEY_PEM],
+                )
+            )
+        # ACCESS_TOKEN at top level is intentionally unused: the device token
+        # comes from CONF_DEVICE_TOKEN or runtime provisioning.
 
     if CONF_DEVICE_TOKEN in config:
         cg.add(tb.set_device_token(config[CONF_DEVICE_TOKEN]))

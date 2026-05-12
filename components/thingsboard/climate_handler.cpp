@@ -71,7 +71,7 @@ RpcResult ClimateHandler::handle_rpc(const std::string &method, const std::strin
   }
 
   ESP_LOGD(TAG, "Climate %s: %s", entity_id.c_str(), method.c_str());
-  return {ESP_OK, build_state_json(obj)};
+  return {ESP_OK, this->build_state_json(obj)};
 }
 
 void ClimateHandler::register_shared_attributes(register_fn reg) {
@@ -187,31 +187,46 @@ void ClimateHandler::append_entity_discovery(JsonArray arr) const {
   }
 }
 
+void ClimateHandler::append_telemetry_fields(EntityBase *obj_base,
+                                             const TelemetryEmit &emit) {
+  auto *obj = static_cast<climate::Climate *>(obj_base);
+  emit_field(emit, "mode",
+             LOG_STR_ARG(climate::climate_mode_to_string(obj->mode)));
+  emit_field(emit, "action",
+             LOG_STR_ARG(climate::climate_action_to_string(obj->action)));
+  emit_field(emit, "current_temperature", obj->current_temperature);
+  emit_field(emit, "target_temperature", obj->target_temperature);
+  emit_field(emit, "target_temperature_low", obj->target_temperature_low);
+  emit_field(emit, "target_temperature_high", obj->target_temperature_high);
+  if (obj->fan_mode.has_value()) {
+    emit_field(emit, "fan_mode",
+               LOG_STR_ARG(climate::climate_fan_mode_to_string(*obj->fan_mode)));
+  }
+  if (obj->has_custom_fan_mode()) {
+    emit_field(emit, "custom_fan_mode", obj->get_custom_fan_mode());
+  }
+  emit_field(emit, "swing_mode",
+             LOG_STR_ARG(climate::climate_swing_mode_to_string(obj->swing_mode)));
+  if (obj->preset.has_value()) {
+    emit_field(emit, "preset",
+               LOG_STR_ARG(climate::climate_preset_to_string(*obj->preset)));
+  }
+  if (obj->has_custom_preset()) {
+    emit_field(emit, "custom_preset", obj->get_custom_preset());
+  }
+  emit_field(emit, "current_humidity", obj->current_humidity);
+  emit_field(emit, "target_humidity", obj->target_humidity);
+}
+
 std::string ClimateHandler::build_state_json(climate::Climate *obj) {
-  return json::build_json([obj](JsonObject root) {
-    root["mode"] = LOG_STR_ARG(climate::climate_mode_to_string(obj->mode));
-    root["action"] = LOG_STR_ARG(climate::climate_action_to_string(obj->action));
-    if (!std::isnan(obj->current_temperature))
-      root["current_temperature"] = obj->current_temperature;
-    if (!std::isnan(obj->target_temperature))
-      root["target_temperature"] = obj->target_temperature;
-    if (!std::isnan(obj->target_temperature_low))
-      root["target_temperature_low"] = obj->target_temperature_low;
-    if (!std::isnan(obj->target_temperature_high))
-      root["target_temperature_high"] = obj->target_temperature_high;
-    if (obj->fan_mode.has_value())
-      root["fan_mode"] = LOG_STR_ARG(climate::climate_fan_mode_to_string(*obj->fan_mode));
-    if (obj->has_custom_fan_mode())
-      root["custom_fan_mode"] = obj->get_custom_fan_mode();
-    root["swing_mode"] = LOG_STR_ARG(climate::climate_swing_mode_to_string(obj->swing_mode));
-    if (obj->preset.has_value())
-      root["preset"] = LOG_STR_ARG(climate::climate_preset_to_string(*obj->preset));
-    if (obj->has_custom_preset())
-      root["custom_preset"] = obj->get_custom_preset();
-    if (!std::isnan(obj->current_humidity))
-      root["current_humidity"] = obj->current_humidity;
-    if (!std::isnan(obj->target_humidity))
-      root["target_humidity"] = obj->target_humidity;
+  // Re-use append_telemetry_fields so the RPC response and the time-series
+  // push share the same shape. We splice each field's pre-encoded JSON literal
+  // straight into the outgoing object via ArduinoJson's serialized() escape.
+  return json::build_json([this, obj](JsonObject root) {
+    this->append_telemetry_fields(
+        obj, [&root](const std::string &k, const std::string &v) {
+          root[k] = serialized(v);
+        });
   });
 }
 

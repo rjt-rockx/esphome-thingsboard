@@ -40,6 +40,11 @@ class ControlIterator {
     this->ota_component_ = ota_component;
   }
 
+  /// Find handler by domain name. ThingsBoardComponent uses this from the
+  /// per-domain telemetry path (T10) to route on_*_update through the same
+  /// `append_telemetry_fields` virtual that powers RPC responses.
+  DomainHandler *find_handler(const std::string &domain);
+
  protected:
   ThingsBoardComponent *parent_;
 
@@ -51,9 +56,6 @@ class ControlIterator {
 
   /// Register shared attribute handler for a component
   void register_attribute_handler(const std::string &key, std::function<void(const std::string&)> handler);
-
-  /// Find handler by domain name
-  DomainHandler *find_handler(const std::string &domain);
 
   /// Discovery response builders
   std::string get_discovery_help_json();

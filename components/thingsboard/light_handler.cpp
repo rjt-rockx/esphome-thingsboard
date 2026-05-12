@@ -53,7 +53,7 @@ RpcResult LightHandler::handle_rpc(const std::string &method, const std::string 
   }
 
   ESP_LOGD(TAG, "Light %s: %s", entity_id.c_str(), method.c_str());
-  return {ESP_OK, build_state_json(obj)};
+  return {ESP_OK, this->build_state_json(obj)};
 }
 
 void LightHandler::register_shared_attributes(register_fn reg) {
@@ -114,10 +114,20 @@ void LightHandler::append_entity_discovery(JsonArray arr) const {
   }
 }
 
+void LightHandler::append_telemetry_fields(EntityBase *obj_base,
+                                           const TelemetryEmit &emit) {
+  auto *obj = static_cast<light::LightState *>(obj_base);
+  emit_field(emit, "state", obj->remote_values.is_on() ? "ON" : "OFF");
+  emit_field(emit, "brightness",
+             static_cast<int>(obj->remote_values.get_brightness() * 255));
+}
+
 std::string LightHandler::build_state_json(light::LightState *obj) {
-  return json::build_json([obj](JsonObject root) {
-    root["state"] = obj->remote_values.is_on() ? "ON" : "OFF";
-    root["brightness"] = static_cast<int>(obj->remote_values.get_brightness() * 255);
+  return json::build_json([this, obj](JsonObject root) {
+    this->append_telemetry_fields(
+        obj, [&root](const std::string &k, const std::string &v) {
+          root[k] = serialized(v);
+        });
   });
 }
 

@@ -31,6 +31,8 @@ CONF_HTTP_REQUEST_ID = "http_request_id"
 CONF_DEVICE_TOKEN = "device_token"
 CONF_CLAIM_SECRET_KEY = "claim_secret_key"
 CONF_CLAIM_DURATION_MS = "claim_duration_ms"
+CONF_OFFLINE_QUEUE_MAX = "offline_queue_max"
+CONF_USE_CLIENT_TIMESTAMPS = "use_client_timestamps"
 
 
 CONFIG_SCHEMA = cv.All(
@@ -46,13 +48,23 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_CLAIM_DURATION_MS): cv.positive_time_period_milliseconds,
             cv.Optional(
                 CONF_TELEMETRY_INTERVAL
-            ): cv.positive_time_period_milliseconds,  # 0/omit = use 100ms batch_delay
+            ): cv.positive_time_period_milliseconds,  # 0/omit = 100ms internal default
             cv.Optional(
                 CONF_TELEMETRY_THROTTLE
             ): cv.positive_time_period_milliseconds,  # 0/omit = no throttle
             cv.Optional(
                 CONF_PERIODIC_SYNC_INTERVAL
             ): cv.positive_time_period_milliseconds,
+            # Cap on the in-memory queue used to buffer telemetry across an
+            # MQTT/HTTP disconnect. Oldest entries drop FIFO when the queue
+            # overflows.
+            cv.Optional(
+                CONF_OFFLINE_QUEUE_MAX, default=200
+            ): cv.positive_not_null_int,
+            # Emit `[{"ts":<ms>,"values":{...}}]` so replays after a
+            # disconnect carry the original capture time instead of TB's
+            # server-receive time.
+            cv.Optional(CONF_USE_CLIENT_TIMESTAMPS, default=False): cv.boolean,
             cv.Optional(
                 CONF_TIMEOUT, default="10s"
             ): cv.positive_time_period_milliseconds,
@@ -128,6 +140,8 @@ async def to_code(config):
         cg.add(var.set_telemetry_throttle(config[CONF_TELEMETRY_THROTTLE]))
     if CONF_PERIODIC_SYNC_INTERVAL in config:
         cg.add(var.set_periodic_sync_interval(config[CONF_PERIODIC_SYNC_INTERVAL]))
+    cg.add(var.set_offline_queue_max(config[CONF_OFFLINE_QUEUE_MAX]))
+    cg.add(var.set_use_client_timestamps(config[CONF_USE_CLIENT_TIMESTAMPS]))
 
     if CONF_ON_CONNECT in config:
         await automation.build_automation(

@@ -60,7 +60,7 @@ RpcResult MediaPlayerHandler::handle_rpc(const std::string &method, const std::s
   }
 
   ESP_LOGD(TAG, "Media player %s: %s", entity_id.c_str(), method.c_str());
-  return {ESP_OK, build_state_json(obj)};
+  return {ESP_OK, this->build_state_json(obj)};
 }
 
 void MediaPlayerHandler::register_shared_attributes(register_fn reg) {
@@ -125,11 +125,20 @@ void MediaPlayerHandler::append_entity_discovery(JsonArray arr) const {
   }
 }
 
+void MediaPlayerHandler::append_telemetry_fields(EntityBase *obj_base,
+                                                 const TelemetryEmit &emit) {
+  auto *obj = static_cast<media_player::MediaPlayer *>(obj_base);
+  emit_field(emit, "state", media_player::media_player_state_to_string(obj->state));
+  emit_field(emit, "volume", obj->volume);
+  emit_field(emit, "muted", obj->is_muted());
+}
+
 std::string MediaPlayerHandler::build_state_json(media_player::MediaPlayer *obj) {
-  return json::build_json([obj](JsonObject root) {
-    root["state"] = media_player::media_player_state_to_string(obj->state);
-    root["volume"] = obj->volume;
-    root["muted"] = obj->is_muted();
+  return json::build_json([this, obj](JsonObject root) {
+    this->append_telemetry_fields(
+        obj, [&root](const std::string &k, const std::string &v) {
+          root[k] = serialized(v);
+        });
   });
 }
 

@@ -95,9 +95,35 @@ public:
   void set_periodic_sync_interval(uint32_t interval) {
     all_telemetry_interval_ = interval;
   }
+  void set_offline_queue_max(uint32_t n) { offline_queue_max_ = n; }
+  // When true, emit `[{"ts": <ms>, "values": {...}}]` so replays after a
+  // disconnect retain the original capture timestamp instead of inheriting
+  // TB's server-receive time.
+  void set_use_client_timestamps(bool v) { use_client_timestamps_ = v; }
 
   void set_mqtt_broker(const std::string &broker) { mqtt_broker_ = broker; }
   void set_mqtt_port(uint16_t port) { mqtt_port_ = port; }
+  // MQTT_BASIC credentials (TB MQTT API: client_id + username + password).
+  void set_mqtt_basic_credentials(const std::string &client_id,
+                                  const std::string &username,
+                                  const std::string &password) {
+    mqtt_basic_client_id_ = client_id;
+    mqtt_basic_username_ = username;
+    mqtt_basic_password_ = password;
+    mqtt_use_basic_ = true;
+  }
+  // X.509 mTLS client certificate + private key (PEM).
+  void set_mqtt_client_certificate(const std::string &cert_pem,
+                                   const std::string &key_pem) {
+    mqtt_client_cert_pem_ = cert_pem;
+    mqtt_client_key_pem_ = key_pem;
+    mqtt_use_x509_ = true;
+  }
+  // Optional server CA bundle (PEM). Pin alone enables TLS even with
+  // ACCESS_TOKEN auth.
+  void set_mqtt_server_ca(const std::string &ca_pem) {
+    mqtt_server_ca_pem_ = ca_pem;
+  }
   void set_device_token(const std::string &token) {
     device_token_ = token;
     access_token_ = token;
@@ -298,6 +324,18 @@ protected:
   uint16_t mqtt_port_{1883};
   std::string device_token_;
 
+  // Optional auth modes wired by the thingsboard_mqtt sibling. ACCESS_TOKEN is
+  // the default; setting any of these flips the transport to MQTT_BASIC or
+  // X.509 (with TLS implied by either x509 or a server CA pin).
+  bool mqtt_use_basic_{false};
+  bool mqtt_use_x509_{false};
+  std::string mqtt_basic_client_id_;
+  std::string mqtt_basic_username_;
+  std::string mqtt_basic_password_;
+  std::string mqtt_client_cert_pem_;
+  std::string mqtt_client_key_pem_;
+  std::string mqtt_server_ca_pem_;
+
   std::string claim_secret_key_;
   uint32_t claim_duration_ms_{0};
 
@@ -317,11 +355,34 @@ protected:
   struct RateLimits {
     uint32_t max_payload_size_{65536};
     uint32_t max_inflight_messages_{100};
-    std::string messages_rate_limit_;     // e.g., "200:1,6000:60,14000:3600"
+    std::string messages_rate_limit_;     // raw string, e.g. "200:1,6000:60,14000:3600"
     std::string telemetry_messages_rate_limit_;
     std::string telemetry_data_points_rate_limit_;
     bool limits_received_{false};
   } rate_limits_;
+
+  // Sliding-window counter: parsed (max, window_ms) tiers + per-tier (window_start, count).
+  // We only need to know whether a given tier is at capacity right now. When all
+  // tiers admit `n` more events, the publish proceeds; otherwise process_batch_
+  // defers (the batch stays pending and will be retried next loop tick).
+  struct RateLimitCounter {
+    struct Tier {
+      uint32_t max;
+      uint32_t window_ms;
+      uint32_t window_start;
+      uint32_t count;
+    };
+    std::vector<Tier> tiers;
+    void parse(const std::string &spec);
+    // Reports admit-or-defer for `n` events occurring at `now`. Does not mutate.
+    bool can_admit(uint32_t n, uint32_t now) const;
+    // Records `n` events at `now`, rotating any windows that have expired.
+    void record(uint32_t n, uint32_t now);
+  };
+  RateLimitCounter messages_counter_;
+  RateLimitCounter telemetry_messages_counter_;
+  RateLimitCounter telemetry_data_points_counter_;
+  void rebuild_rate_limit_counters_();
 
   struct PendingMessage {
     std::string key;
@@ -334,11 +395,25 @@ protected:
   };
   std::map<std::string, PendingMessage> pending_messages_;
   uint32_t last_batch_process_{0};
-  uint32_t batch_delay_{100};
+  // Internal floor on how often process_batch_ may emit. Not user-configurable;
+  // YAML callers set telemetry_interval_ if they want a longer cadence.
+  static constexpr uint32_t DEFAULT_BATCH_DELAY_MS = 100;
 
-  uint32_t telemetry_interval_{0};  // 0 = use batch_delay_
+  uint32_t telemetry_interval_{0};  // 0 = use DEFAULT_BATCH_DELAY_MS
+
+  uint32_t effective_batch_interval_() const {
+    return this->telemetry_interval_ > 0 ? this->telemetry_interval_
+                                         : DEFAULT_BATCH_DELAY_MS;
+  }
   uint32_t telemetry_throttle_{0};  // 0 = disabled
   std::map<std::string, uint32_t> last_key_send_;
+  // Bound on last_key_send_ to keep long-running devices from leaking heap as
+  // unique throttled keys accumulate (T6).
+  static constexpr size_t LAST_KEY_SEND_MAX = 256;
+
+  // T5 / T7 knobs.
+  uint32_t offline_queue_max_{200};
+  bool use_client_timestamps_{false};
 
   uint32_t last_all_telemetry_{0};
   uint32_t all_telemetry_interval_{30000};
@@ -408,6 +483,10 @@ protected:
   void add_to_batch_(const std::string &key, const std::string &value,
                      bool is_attribute);
   void process_batch_();
+  // Emits a single side of pending_messages_ (telemetry vs client-attribute)
+  // in payload-size-bounded chunks, deferring whatever the rate-limit windows
+  // can't admit right now.
+  void process_partition_(bool is_attribute);
   void clear_batch_();
 
   void send_status_telemetry_(const std::string &status,
@@ -427,6 +506,11 @@ protected:
   // get_object_id() deprecation removed in ESPHome 2026.7.0.
   std::string get_domain_scoped_id_(const std::string &domain,
                                     const EntityBase *obj);
+
+  // Routes a rich-domain entity update through its DomainHandler so the full
+  // per-entity state shape lands on TB's time-series, not just the one field
+  // the legacy on_*_update used to send (T10).
+  void emit_handler_telemetry_(const std::string &domain, EntityBase *obj);
 
   void setup_mqtt_();
   void connect_mqtt_();
@@ -593,11 +677,7 @@ protected:
     bool on_lock(lock::Lock *obj) override {
       if (obj->is_internal())
         return true;
-      std::string scoped_id =
-          parent_->get_domain_scoped_id_("lock", obj);
-      std::string state_str = lock::lock_state_to_string(obj->state);
-      parent_->send_single_telemetry_(scoped_id, state_str);
-      parent_->send_single_client_attribute_(scoped_id, state_str);
+      parent_->emit_handler_telemetry_("lock", obj);
       return true;
     }
 #endif
@@ -606,10 +686,7 @@ protected:
     bool on_valve(valve::Valve *obj) override {
       if (obj->is_internal())
         return true;
-      std::string scoped_id =
-          parent_->get_domain_scoped_id_("valve", obj);
-      parent_->send_single_telemetry_(scoped_id, obj->position);
-      parent_->send_single_client_attribute_(scoped_id, obj->position);
+      parent_->emit_handler_telemetry_("valve", obj);
       return true;
     }
 #endif
@@ -618,12 +695,7 @@ protected:
     bool on_media_player(media_player::MediaPlayer *obj) override {
       if (obj->is_internal())
         return true;
-      std::string scoped_id =
-          parent_->get_domain_scoped_id_("media_player", obj);
-      std::string state_str =
-          media_player::media_player_state_to_string(obj->state);
-      parent_->send_single_telemetry_(scoped_id, state_str);
-      parent_->send_single_client_attribute_(scoped_id, state_str);
+      parent_->emit_handler_telemetry_("media_player", obj);
       return true;
     }
 #endif
@@ -633,13 +705,7 @@ protected:
         alarm_control_panel::AlarmControlPanel *obj) override {
       if (obj->is_internal())
         return true;
-      std::string scoped_id = parent_->get_domain_scoped_id_(
-          "alarm_control_panel", obj);
-      std::string state_str =
-          alarm_control_panel::alarm_control_panel_state_to_string(
-              obj->get_state());
-      parent_->send_single_telemetry_(scoped_id, state_str);
-      parent_->send_single_client_attribute_(scoped_id, state_str);
+      parent_->emit_handler_telemetry_("alarm_control_panel", obj);
       return true;
     }
 #endif
@@ -683,10 +749,7 @@ protected:
     bool on_fan(fan::Fan *obj) override {
       if (obj->is_internal())
         return true;
-      std::string scoped_id =
-          parent_->get_domain_scoped_id_("fan", obj);
-      parent_->send_single_telemetry_(scoped_id, obj->state ? 1.0f : 0.0f);
-      parent_->send_single_client_attribute_(scoped_id, obj->state);
+      parent_->emit_handler_telemetry_("fan", obj);
       return true;
     }
 #endif
@@ -695,12 +758,7 @@ protected:
     bool on_light(light::LightState *obj) override {
       if (obj->is_internal())
         return true;
-      std::string scoped_id =
-          parent_->get_domain_scoped_id_("light", obj);
-      parent_->send_single_telemetry_(scoped_id,
-                                      obj->remote_values.is_on() ? 1.0f : 0.0f);
-      parent_->send_single_client_attribute_(scoped_id,
-                                             obj->remote_values.is_on());
+      parent_->emit_handler_telemetry_("light", obj);
       return true;
     }
 #endif
@@ -709,10 +767,7 @@ protected:
     bool on_cover(cover::Cover *obj) override {
       if (obj->is_internal())
         return true;
-      std::string scoped_id =
-          parent_->get_domain_scoped_id_("cover", obj);
-      parent_->send_single_telemetry_(scoped_id, obj->position);
-      parent_->send_single_client_attribute_(scoped_id, obj->position);
+      parent_->emit_handler_telemetry_("cover", obj);
       return true;
     }
 #endif
@@ -721,13 +776,7 @@ protected:
     bool on_climate(climate::Climate *obj) override {
       if (obj->is_internal())
         return true;
-      if (!std::isnan(obj->target_temperature)) {
-        std::string scoped_id =
-            parent_->get_domain_scoped_id_("climate", obj);
-        parent_->send_single_telemetry_(scoped_id, obj->target_temperature);
-        parent_->send_single_client_attribute_(scoped_id,
-                                               obj->target_temperature);
-      }
+      parent_->emit_handler_telemetry_("climate", obj);
       return true;
     }
 #endif

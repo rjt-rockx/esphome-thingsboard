@@ -1,4 +1,5 @@
 #include "thingsboard_client.h"
+#include <cstdlib>
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
 #include "esphome/core/controller_registry.h"
@@ -19,34 +20,10 @@ static const char *TAG = "thingsboard";
 
 namespace {
 
-// JSON-encode a string into a `"…"` literal, escaping per RFC 8259.
-// Used at batch-add time so a value containing `"`, `\`, or control chars
-// can't break the outgoing payload.
-std::string encode_json_string(const std::string &s) {
-  std::string out;
-  out.reserve(s.size() + 2);
-  out.push_back('"');
-  for (char c : s) {
-    switch (c) {
-      case '"': out += "\\\""; break;
-      case '\\': out += "\\\\"; break;
-      case '\b': out += "\\b"; break;
-      case '\f': out += "\\f"; break;
-      case '\n': out += "\\n"; break;
-      case '\r': out += "\\r"; break;
-      case '\t': out += "\\t"; break;
-      default:
-        if (static_cast<uint8_t>(c) < 0x20) {
-          char buf[8];
-          snprintf(buf, sizeof(buf), "\\u%04x", static_cast<uint8_t>(c));
-          out += buf;
-        } else {
-          out.push_back(c);
-        }
-    }
-  }
-  out.push_back('"');
-  return out;
+// Wrapper to keep call-sites short; the canonical implementation lives in
+// domain_handler.h so all DomainHandlers can share it.
+inline std::string encode_json_string(const std::string &s) {
+  return json_encode_string(s);
 }
 
 }  // namespace
@@ -109,11 +86,9 @@ void ThingsBoardComponent::dump_config() {
                 this->mqtt_port_);
   ESP_LOGCONFIG(TAG, "  Device Name: %s", this->device_name_.c_str());
   ESP_LOGCONFIG(TAG, "  Telemetry: Batched with deduplication");
-  if (this->telemetry_interval_ > 0) {
-    ESP_LOGCONFIG(TAG, "  Telemetry Interval: %ums", this->telemetry_interval_);
-  } else {
-    ESP_LOGCONFIG(TAG, "  Batch Delay: %ums", this->batch_delay_);
-  }
+  ESP_LOGCONFIG(TAG, "  Telemetry Interval: %ums%s",
+                this->effective_batch_interval_(),
+                this->telemetry_interval_ > 0 ? "" : " (default)");
   if (this->telemetry_throttle_ > 0) {
     ESP_LOGCONFIG(TAG, "  Telemetry Throttle: %ums", this->telemetry_throttle_);
   }
@@ -192,10 +167,7 @@ void ThingsBoardComponent::loop() {
   }
 
   if (!this->pending_messages_.empty()) {
-    uint32_t interval = this->telemetry_interval_ > 0
-        ? this->telemetry_interval_
-        : this->batch_delay_;
-    if (now - this->last_batch_process_ >= interval) {
+    if (now - this->last_batch_process_ >= this->effective_batch_interval_()) {
       this->process_batch_();
     }
   }
@@ -680,6 +652,24 @@ ThingsBoardComponent::get_domain_scoped_id_(const std::string &domain,
   return domain + "." + std::string(obj->get_object_id_to(buf));
 }
 
+void ThingsBoardComponent::emit_handler_telemetry_(const std::string &domain,
+                                                   EntityBase *obj) {
+  DomainHandler *handler = this->control_iterator_.find_handler(domain);
+  if (handler == nullptr) {
+    ESP_LOGW(TAG, "No handler for domain '%s'; telemetry skipped",
+             domain.c_str());
+    return;
+  }
+  // Compose `domain.object_id.subkey` as the TB telemetry key. Each subkey
+  // value is a JSON literal already (number/`true`/`"escaped"`), suitable for
+  // verbatim splicing via add_to_batch_.
+  const std::string scope = this->get_domain_scoped_id_(domain, obj);
+  handler->append_telemetry_fields(
+      obj, [this, &scope](const std::string &subkey, const std::string &v) {
+        this->add_to_batch_(scope + "." + subkey, v, /*is_attribute=*/false);
+      });
+}
+
 #ifdef USE_THINGSBOARD_MQTT_TRANSPORT
 void ThingsBoardComponent::setup_mqtt_() {
   ESP_LOGD(TAG, "Setting up MQTT client");
@@ -689,6 +679,18 @@ void ThingsBoardComponent::setup_mqtt_() {
   this->mqtt_client_->set_parent_component(this);
   this->mqtt_client_->set_broker(this->mqtt_broker_, this->mqtt_port_);
   this->mqtt_client_->set_client_id(this->device_name_);
+
+  if (!this->mqtt_server_ca_pem_.empty()) {
+    this->mqtt_client_->set_server_ca(this->mqtt_server_ca_pem_);
+  }
+  if (this->mqtt_use_x509_) {
+    this->mqtt_client_->set_client_certificate(this->mqtt_client_cert_pem_,
+                                               this->mqtt_client_key_pem_);
+  } else if (this->mqtt_use_basic_) {
+    this->mqtt_client_->set_basic_credentials(this->mqtt_basic_client_id_,
+                                              this->mqtt_basic_username_,
+                                              this->mqtt_basic_password_);
+  }
 
   // Inbound data callbacks are wired by register_transport(); only the
   // MQTT-specific lifecycle hooks are wired here.
@@ -1016,13 +1018,7 @@ void ThingsBoardComponent::on_text_sensor_update(text_sensor::TextSensor *obj) {
 void ThingsBoardComponent::on_fan_update(fan::Fan *obj) {
   if (obj->is_internal() || !this->is_connected())
     return;
-
-  ESP_LOGV(TAG, "Fan '%s' updated: %s", obj->get_name().c_str(),
-           obj->state ? "ON" : "OFF");
-
-  std::string scoped_id = this->get_domain_scoped_id_("fan", obj);
-  this->send_single_telemetry_(scoped_id, obj->state ? 1.0f : 0.0f);
-  this->send_single_client_attribute_(scoped_id, obj->state);
+  this->emit_handler_telemetry_("fan", obj);
 }
 #endif
 
@@ -1030,10 +1026,7 @@ void ThingsBoardComponent::on_fan_update(fan::Fan *obj) {
 void ThingsBoardComponent::on_light_update(light::LightState *obj) {
   if (obj->is_internal() || !this->is_connected())
     return;
-
-  std::string scoped_id = this->get_domain_scoped_id_("light", obj);
-  this->send_single_telemetry_(scoped_id, obj->remote_values.is_on() ? 1.0f : 0.0f);
-  this->send_single_client_attribute_(scoped_id, obj->remote_values.is_on());
+  this->emit_handler_telemetry_("light", obj);
 }
 #endif
 
@@ -1041,13 +1034,7 @@ void ThingsBoardComponent::on_light_update(light::LightState *obj) {
 void ThingsBoardComponent::on_cover_update(cover::Cover *obj) {
   if (obj->is_internal() || !this->is_connected())
     return;
-
-  ESP_LOGV(TAG, "Cover '%s' updated: position=%.2f", obj->get_name().c_str(),
-           obj->position);
-
-  std::string scoped_id = this->get_domain_scoped_id_("cover", obj);
-  this->send_single_telemetry_(scoped_id, obj->position);
-  this->send_single_client_attribute_(scoped_id, obj->position);
+  this->emit_handler_telemetry_("cover", obj);
 }
 #endif
 
@@ -1055,13 +1042,7 @@ void ThingsBoardComponent::on_cover_update(cover::Cover *obj) {
 void ThingsBoardComponent::on_climate_update(climate::Climate *obj) {
   if (obj->is_internal() || !this->is_connected())
     return;
-
-  ESP_LOGV(TAG, "Climate '%s' updated: target=%.1f", obj->get_name().c_str(),
-           obj->target_temperature);
-
-  std::string scoped_id = this->get_domain_scoped_id_("climate", obj);
-  this->send_single_telemetry_(scoped_id, obj->target_temperature);
-  this->send_single_client_attribute_(scoped_id, obj->target_temperature);
+  this->emit_handler_telemetry_("climate", obj);
 }
 #endif
 
@@ -1121,11 +1102,7 @@ void ThingsBoardComponent::on_datetime_update(datetime::DateTimeEntity *obj) {
 void ThingsBoardComponent::on_lock_update(lock::Lock *obj) {
   if (obj->is_internal() || !this->is_connected())
     return;
-
-  bool is_locked = (obj->state == lock::LOCK_STATE_LOCKED);
-  std::string scoped_id = this->get_domain_scoped_id_("lock", obj);
-  this->send_single_telemetry_(scoped_id, is_locked ? 1.0f : 0.0f);
-  this->send_single_client_attribute_(scoped_id, is_locked);
+  this->emit_handler_telemetry_("lock", obj);
 }
 #endif
 
@@ -1133,10 +1110,7 @@ void ThingsBoardComponent::on_lock_update(lock::Lock *obj) {
 void ThingsBoardComponent::on_valve_update(valve::Valve *obj) {
   if (obj->is_internal() || !this->is_connected())
     return;
-
-  std::string scoped_id = this->get_domain_scoped_id_("valve", obj);
-  this->send_single_telemetry_(scoped_id, obj->position);
-  this->send_single_client_attribute_(scoped_id, obj->position);
+  this->emit_handler_telemetry_("valve", obj);
 }
 #endif
 
@@ -1145,25 +1119,7 @@ void ThingsBoardComponent::on_media_player_update(
     media_player::MediaPlayer *obj) {
   if (obj->is_internal() || !this->is_connected())
     return;
-
-  std::string state_str;
-  switch (obj->state) {
-  case media_player::MEDIA_PLAYER_STATE_IDLE:
-    state_str = "idle";
-    break;
-  case media_player::MEDIA_PLAYER_STATE_PLAYING:
-    state_str = "playing";
-    break;
-  case media_player::MEDIA_PLAYER_STATE_PAUSED:
-    state_str = "paused";
-    break;
-  default:
-    state_str = "unknown";
-    break;
-  }
-  std::string scoped_id = this->get_domain_scoped_id_("media_player", obj);
-  this->send_single_telemetry_(scoped_id, state_str);
-  this->send_single_client_attribute_(scoped_id, state_str);
+  this->emit_handler_telemetry_("media_player", obj);
 }
 #endif
 
@@ -1172,46 +1128,7 @@ void ThingsBoardComponent::on_alarm_control_panel_update(
     alarm_control_panel::AlarmControlPanel *obj) {
   if (obj->is_internal() || !this->is_connected())
     return;
-
-  std::string state_str;
-  switch (obj->get_state()) {
-  case alarm_control_panel::ACP_STATE_DISARMED:
-    state_str = "disarmed";
-    break;
-  case alarm_control_panel::ACP_STATE_ARMED_HOME:
-    state_str = "armed_home";
-    break;
-  case alarm_control_panel::ACP_STATE_ARMED_AWAY:
-    state_str = "armed_away";
-    break;
-  case alarm_control_panel::ACP_STATE_ARMED_NIGHT:
-    state_str = "armed_night";
-    break;
-  case alarm_control_panel::ACP_STATE_ARMED_VACATION:
-    state_str = "armed_vacation";
-    break;
-  case alarm_control_panel::ACP_STATE_ARMED_CUSTOM_BYPASS:
-    state_str = "armed_custom_bypass";
-    break;
-  case alarm_control_panel::ACP_STATE_PENDING:
-    state_str = "pending";
-    break;
-  case alarm_control_panel::ACP_STATE_ARMING:
-    state_str = "arming";
-    break;
-  case alarm_control_panel::ACP_STATE_DISARMING:
-    state_str = "disarming";
-    break;
-  case alarm_control_panel::ACP_STATE_TRIGGERED:
-    state_str = "triggered";
-    break;
-  default:
-    state_str = "unknown";
-    break;
-  }
-  std::string scoped_id = this->get_domain_scoped_id_("alarm_control_panel", obj);
-  this->send_single_telemetry_(scoped_id, state_str);
-  this->send_single_client_attribute_(scoped_id, state_str);
+  this->emit_handler_telemetry_("alarm_control_panel", obj);
 }
 #endif
 
@@ -1323,36 +1240,29 @@ void ThingsBoardComponent::send_all_components_telemetry_() {
 
 #ifdef USE_FAN
   for (auto *obj : App.get_fans()) {
-    if (!obj->is_internal()) {
-      this->send_single_telemetry_(this->get_domain_scoped_id_("fan", obj),
-                                   obj->state ? 1.0f : 0.0f);
-    }
+    if (!obj->is_internal())
+      this->emit_handler_telemetry_("fan", obj);
   }
 #endif
 
 #ifdef USE_LIGHT
   for (auto *obj : App.get_lights()) {
-    if (!obj->is_internal()) {
-      this->send_single_telemetry_(this->get_domain_scoped_id_("light", obj),
-                                   obj->remote_values.is_on() ? 1.0f : 0.0f);
-    }
+    if (!obj->is_internal())
+      this->emit_handler_telemetry_("light", obj);
   }
 #endif
 
 #ifdef USE_COVER
   for (auto *obj : App.get_covers()) {
-    if (!obj->is_internal() && !std::isnan(obj->position)) {
-      this->send_single_telemetry_(this->get_domain_scoped_id_("cover", obj), obj->position);
-    }
+    if (!obj->is_internal())
+      this->emit_handler_telemetry_("cover", obj);
   }
 #endif
 
 #ifdef USE_CLIMATE
   for (auto *obj : App.get_climates()) {
-    if (!obj->is_internal() && !std::isnan(obj->target_temperature)) {
-      this->send_single_telemetry_(this->get_domain_scoped_id_("climate", obj),
-                                   obj->target_temperature);
-    }
+    if (!obj->is_internal())
+      this->emit_handler_telemetry_("climate", obj);
   }
 #endif
 
@@ -1397,86 +1307,29 @@ void ThingsBoardComponent::send_all_components_telemetry_() {
 
 #ifdef USE_LOCK
   for (auto *obj : App.get_locks()) {
-    if (!obj->is_internal()) {
-      bool is_locked = (obj->state == lock::LOCK_STATE_LOCKED);
-      this->send_single_telemetry_(this->get_domain_scoped_id_("lock", obj),
-                                   is_locked ? 1.0f : 0.0f);
-    }
+    if (!obj->is_internal())
+      this->emit_handler_telemetry_("lock", obj);
   }
 #endif
 
 #ifdef USE_VALVE
   for (auto *obj : App.get_valves()) {
-    if (!obj->is_internal()) {
-      this->send_single_telemetry_(this->get_domain_scoped_id_("valve", obj), obj->position);
-    }
+    if (!obj->is_internal())
+      this->emit_handler_telemetry_("valve", obj);
   }
 #endif
 
 #ifdef USE_MEDIA_PLAYER
   for (auto *obj : App.get_media_players()) {
-    if (!obj->is_internal()) {
-      std::string state_str;
-      switch (obj->state) {
-      case media_player::MEDIA_PLAYER_STATE_IDLE:
-        state_str = "idle";
-        break;
-      case media_player::MEDIA_PLAYER_STATE_PLAYING:
-        state_str = "playing";
-        break;
-      case media_player::MEDIA_PLAYER_STATE_PAUSED:
-        state_str = "paused";
-        break;
-      default:
-        state_str = "unknown";
-        break;
-      }
-      this->send_single_telemetry_(this->get_domain_scoped_id_("media_player", obj), state_str);
-    }
+    if (!obj->is_internal())
+      this->emit_handler_telemetry_("media_player", obj);
   }
 #endif
 
 #ifdef USE_ALARM_CONTROL_PANEL
   for (auto *obj : App.get_alarm_control_panels()) {
-    if (!obj->is_internal()) {
-      std::string state_str;
-      switch (obj->get_state()) {
-      case alarm_control_panel::ACP_STATE_DISARMED:
-        state_str = "disarmed";
-        break;
-      case alarm_control_panel::ACP_STATE_ARMED_HOME:
-        state_str = "armed_home";
-        break;
-      case alarm_control_panel::ACP_STATE_ARMED_AWAY:
-        state_str = "armed_away";
-        break;
-      case alarm_control_panel::ACP_STATE_ARMED_NIGHT:
-        state_str = "armed_night";
-        break;
-      case alarm_control_panel::ACP_STATE_ARMED_VACATION:
-        state_str = "armed_vacation";
-        break;
-      case alarm_control_panel::ACP_STATE_ARMED_CUSTOM_BYPASS:
-        state_str = "armed_custom_bypass";
-        break;
-      case alarm_control_panel::ACP_STATE_PENDING:
-        state_str = "pending";
-        break;
-      case alarm_control_panel::ACP_STATE_ARMING:
-        state_str = "arming";
-        break;
-      case alarm_control_panel::ACP_STATE_DISARMING:
-        state_str = "disarming";
-        break;
-      case alarm_control_panel::ACP_STATE_TRIGGERED:
-        state_str = "triggered";
-        break;
-      default:
-        state_str = "unknown";
-        break;
-      }
-      this->send_single_telemetry_(this->get_domain_scoped_id_("alarm_control_panel", obj), state_str);
-    }
+    if (!obj->is_internal())
+      this->emit_handler_telemetry_("alarm_control_panel", obj);
   }
 #endif
 
@@ -1543,6 +1396,7 @@ void ThingsBoardComponent::handle_session_limits_response_(
     }
 
     this->rate_limits_.limits_received_ = true;
+    this->rebuild_rate_limit_counters_();
     ESP_LOGI(TAG, "Session limits: maxPayload=%u, maxInflight=%u",
              this->rate_limits_.max_payload_size_,
              this->rate_limits_.max_inflight_messages_);
@@ -1555,13 +1409,64 @@ void ThingsBoardComponent::handle_session_limits_response_(
   });
 }
 
+void ThingsBoardComponent::RateLimitCounter::parse(const std::string &spec) {
+  this->tiers.clear();
+  // Spec format: "<max>:<window_seconds>[,<max>:<window_seconds>]*"; an empty
+  // string means "no limit." Whitespace tolerance keeps us forgiving of TB
+  // future-proofing the format.
+  size_t pos = 0;
+  while (pos < spec.size()) {
+    size_t comma = spec.find(',', pos);
+    if (comma == std::string::npos) comma = spec.size();
+    std::string tok = spec.substr(pos, comma - pos);
+    pos = comma + 1;
+
+    size_t colon = tok.find(':');
+    if (colon == std::string::npos) continue;
+    uint32_t max = static_cast<uint32_t>(std::strtoul(tok.c_str(), nullptr, 10));
+    uint32_t window_s = static_cast<uint32_t>(
+        std::strtoul(tok.c_str() + colon + 1, nullptr, 10));
+    if (max == 0 || window_s == 0) continue;
+    this->tiers.push_back({max, window_s * 1000, 0, 0});
+  }
+}
+
+bool ThingsBoardComponent::RateLimitCounter::can_admit(uint32_t n,
+                                                       uint32_t now) const {
+  for (const auto &t : this->tiers) {
+    uint32_t count = t.count;
+    // If the window has rolled past, treat its count as 0 for admission.
+    if (t.window_start == 0 || now - t.window_start >= t.window_ms) count = 0;
+    if (count + n > t.max) return false;
+  }
+  return true;
+}
+
+void ThingsBoardComponent::RateLimitCounter::record(uint32_t n, uint32_t now) {
+  for (auto &t : this->tiers) {
+    if (t.window_start == 0 || now - t.window_start >= t.window_ms) {
+      t.window_start = now;
+      t.count = 0;
+    }
+    t.count += n;
+  }
+}
+
+void ThingsBoardComponent::rebuild_rate_limit_counters_() {
+  this->messages_counter_.parse(this->rate_limits_.messages_rate_limit_);
+  this->telemetry_messages_counter_.parse(
+      this->rate_limits_.telemetry_messages_rate_limit_);
+  this->telemetry_data_points_counter_.parse(
+      this->rate_limits_.telemetry_data_points_rate_limit_);
+}
+
 bool ThingsBoardComponent::check_rate_limits_() {
   if (!this->rate_limits_.limits_received_) {
     return true;
   }
 
   const uint32_t now = millis();
-  if (now - this->last_batch_process_ < this->batch_delay_) {
+  if (now - this->last_batch_process_ < this->effective_batch_interval_()) {
     return false;
   }
 
@@ -1584,6 +1489,20 @@ void ThingsBoardComponent::add_to_batch_(const std::string &key,
     }
     if (!throttled) {
       this->last_key_send_[key] = now;
+      // T6: cap the throttle map. Linear scan is fine at LAST_KEY_SEND_MAX=256
+      // and only runs when we'd otherwise grow beyond the cap.
+      if (this->last_key_send_.size() > LAST_KEY_SEND_MAX) {
+        auto oldest = this->last_key_send_.begin();
+        for (auto it = this->last_key_send_.begin();
+             it != this->last_key_send_.end(); ++it) {
+          if (static_cast<int32_t>(it->second - oldest->second) < 0) {
+            oldest = it;
+          }
+        }
+        if (oldest->first != key) {
+          this->last_key_send_.erase(oldest);
+        }
+      }
     }
   }
 
@@ -1598,6 +1517,23 @@ void ThingsBoardComponent::add_to_batch_(const std::string &key,
     msg.timestamp = now;
     msg.is_attribute = is_attribute;
     this->pending_messages_[key] = msg;
+
+    // T5: bounded offline queue. Drop oldest entry by timestamp when over cap.
+    while (this->offline_queue_max_ > 0 &&
+           this->pending_messages_.size() > this->offline_queue_max_) {
+      auto oldest = this->pending_messages_.begin();
+      for (auto qit = this->pending_messages_.begin();
+           qit != this->pending_messages_.end(); ++qit) {
+        if (static_cast<int32_t>(qit->second.timestamp -
+                                 oldest->second.timestamp) < 0) {
+          oldest = qit;
+        }
+      }
+      ESP_LOGW(TAG,
+               "Offline queue at cap (%u); dropping oldest pending key '%s'",
+               this->offline_queue_max_, oldest->first.c_str());
+      this->pending_messages_.erase(oldest);
+    }
   }
 
   if (this->last_batch_process_ == 0) {
@@ -1610,49 +1546,145 @@ void ThingsBoardComponent::process_batch_() {
     return;
   }
 
+  // T5: keep the queue intact when offline so reconnect drains it. Bound is
+  // enforced at add_to_batch_ time, so the queue cannot grow without limit
+  // during the disconnect window.
+  if (!this->is_connected() || this->transport_ == nullptr) {
+    this->last_batch_process_ = millis();
+    return;
+  }
+
   if (!this->check_rate_limits_()) {
     return;
   }
 
-  if (!this->is_connected()) {
-    this->clear_batch_();
-    return;
-  }
-
-  size_t telemetry_count = 0;
-  size_t attribute_count = 0;
-
-  std::string telemetry_payload = json::build_json([&](JsonObject root) {
-    for (const auto &kv : this->pending_messages_) {
-      const auto &msg = kv.second;
-      if (msg.is_attribute) continue;
-      root[msg.key] = serialized(msg.value);
-      telemetry_count++;
-    }
-  });
-
-  std::string attributes_payload = json::build_json([&](JsonObject root) {
-    for (const auto &kv : this->pending_messages_) {
-      const auto &msg = kv.second;
-      if (!msg.is_attribute) continue;
-      root[msg.key] = serialized(msg.value);
-      attribute_count++;
-    }
-  });
-
-  this->pending_messages_.clear();
-
-  if (telemetry_count > 0 && this->transport_ != nullptr) {
-    this->transport_->publish_telemetry(telemetry_payload);
-    ESP_LOGD(TAG, "Sent batched telemetry: %zu keys", telemetry_count);
-  }
-
-  if (attribute_count > 0 && this->transport_ != nullptr) {
-    this->transport_->publish_client_attributes(attributes_payload);
-    ESP_LOGV(TAG, "Sent batched attributes: %s", attributes_payload.c_str());
-  }
-
+  // Telemetry first so the higher-volume side gets dibs on the rate-limit
+  // budget; attributes are usually low-frequency snapshot data.
+  this->process_partition_(/*is_attribute=*/false);
+  this->process_partition_(/*is_attribute=*/true);
   this->last_batch_process_ = millis();
+}
+
+void ThingsBoardComponent::process_partition_(bool is_attribute) {
+  const uint32_t now = millis();
+  // Reserve some headroom so framing (`{}` or `[{"ts":...,"values":{}}]`) and
+  // ArduinoJson rounding can't push us a few bytes over the server's cap.
+  constexpr size_t FRAMING_OVERHEAD = 64;
+  const uint32_t hard_budget = this->rate_limits_.max_payload_size_ > 0
+                                   ? this->rate_limits_.max_payload_size_
+                                   : 65536;
+  const size_t budget = hard_budget > FRAMING_OVERHEAD
+                            ? hard_budget - FRAMING_OVERHEAD
+                            : hard_budget;
+
+  std::vector<std::string> keys;
+  keys.reserve(this->pending_messages_.size());
+  for (const auto &kv : this->pending_messages_) {
+    if (kv.second.is_attribute == is_attribute) keys.push_back(kv.first);
+  }
+  if (keys.empty()) return;
+
+  size_t cursor = 0;
+  while (cursor < keys.size()) {
+    // Build a chunk that fits in `budget`. The first key is admitted
+    // unconditionally so a single oversize value still goes out (the broker
+    // will reject it, surfacing the misconfiguration loudly).
+    std::vector<std::string> chunk;
+    size_t estimated = 2;  // outer braces
+    while (cursor < keys.size()) {
+      auto it = this->pending_messages_.find(keys[cursor]);
+      if (it == this->pending_messages_.end()) {
+        ++cursor;
+        continue;
+      }
+      const auto &msg = it->second;
+      // "key":value, framing per entry (worst case: 4 chars on top of contents).
+      size_t entry = msg.key.size() + msg.value.size() + 4;
+      if (!chunk.empty() && estimated + entry > budget) break;
+      chunk.push_back(keys[cursor]);
+      estimated += entry;
+      ++cursor;
+    }
+    if (chunk.empty()) continue;
+
+    const size_t datapoints = chunk.size();
+    const bool need_telemetry_tiers = !is_attribute;
+    if (!this->messages_counter_.can_admit(1, now) ||
+        (need_telemetry_tiers &&
+         (!this->telemetry_messages_counter_.can_admit(1, now) ||
+          !this->telemetry_data_points_counter_.can_admit(datapoints, now)))) {
+      ESP_LOGD(TAG, "%s rate-limited; deferring %zu key(s) to next tick",
+               is_attribute ? "attribute" : "telemetry",
+               keys.size() - (cursor - chunk.size()));
+      return;
+    }
+
+    std::string payload;
+    if (this->use_client_timestamps_ && !is_attribute) {
+      // Group chunk entries by their captured timestamp into TB's
+      // `[{"ts":<ms>,"values":{...}}]` form.
+      std::map<uint32_t, std::vector<const PendingMessage *>> by_ts;
+      for (const auto &k : chunk) {
+        auto it = this->pending_messages_.find(k);
+        if (it != this->pending_messages_.end()) {
+          by_ts[it->second.timestamp].push_back(&it->second);
+        }
+      }
+      // Build manually; build_json's outer-object shape doesn't fit an array.
+      payload = "[";
+      bool first_group = true;
+      for (const auto &g : by_ts) {
+        if (!first_group) payload += ",";
+        first_group = false;
+        payload += "{\"ts\":";
+        payload += std::to_string(g.first);
+        payload += ",\"values\":{";
+        bool first_kv = true;
+        for (const auto *msg : g.second) {
+          if (!first_kv) payload += ",";
+          first_kv = false;
+          payload += encode_json_string(msg->key);
+          payload += ":";
+          payload += msg->value;
+        }
+        payload += "}}";
+      }
+      payload += "]";
+    } else {
+      payload = json::build_json([&](JsonObject root) {
+        for (const auto &k : chunk) {
+          auto it = this->pending_messages_.find(k);
+          if (it != this->pending_messages_.end()) {
+            root[it->second.key] = serialized(it->second.value);
+          }
+        }
+      });
+    }
+
+    bool ok = is_attribute
+                  ? this->transport_->publish_client_attributes(payload)
+                  : this->transport_->publish_telemetry(payload);
+    if (!ok) {
+      ESP_LOGW(TAG,
+               "publish_%s failed (size=%zu); leaving %zu keys pending for "
+               "next tick",
+               is_attribute ? "client_attributes" : "telemetry", payload.size(),
+               keys.size() - (cursor - chunk.size()));
+      return;
+    }
+
+    this->messages_counter_.record(1, now);
+    if (need_telemetry_tiers) {
+      this->telemetry_messages_counter_.record(1, now);
+      this->telemetry_data_points_counter_.record(datapoints, now);
+    }
+    for (const auto &k : chunk) {
+      this->pending_messages_.erase(k);
+    }
+    ESP_LOGD(TAG, "Sent %s chunk: %zu keys, %zu bytes",
+             is_attribute ? "attribute" : "telemetry", chunk.size(),
+             payload.size());
+  }
 }
 
 void ThingsBoardComponent::clear_batch_() {

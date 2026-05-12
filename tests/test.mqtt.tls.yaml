@@ -1,0 +1,77 @@
+# Compile-test config for the MQTT transport with X.509 mTLS.
+# Exercises the TLS codegen/cert-wiring path; not intended to run against a real broker.
+# PEMs below are dummy self-signed material; never reuse for production.
+
+esphome:
+  name: tb-mqtt-tls-test
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - thingsboard
+      - thingsboard_mqtt
+      - thingsboard_mqtt_ota
+
+logger:
+
+wifi:
+  ssid: "test"
+  password: "testtesttest"
+
+http_request:
+  id: tb_http
+  timeout: 10s
+
+thingsboard:
+  id: thingsboard_component
+  server_url: "https://demo.thingsboard.io"
+
+thingsboard_mqtt:
+  thingsboard_id: thingsboard_component
+  broker: "demo.thingsboard.io"
+  # Port omitted on purpose: 8883 is selected automatically when TLS material is present.
+  credentials:
+    type: X509_CERTIFICATE
+    certificate_pem: |
+      -----BEGIN CERTIFICATE-----
+      MIIBhTCCASugAwIBAgIQIRi6zePL6mKjOipn+dNuaTAKBggqhkjOPQQDAjASMRAw
+      DgYDVQQKEwdBY21lIENvMB4XDTE3MTAyMDE5NDMwNloXDTE4MTAyMDE5NDMwNlow
+      EjEQMA4GA1UEChMHQWNtZSBDbzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABD0d
+      7VNhbWvZLWPuj/RtHFjvtJBEwOkhbN/BnnE8rnZR8+sbwnc/KhCk3FhnpHZnQz7B
+      5aETbbIgmuvewdjvSBSjYzBhMA4GA1UdDwEB/wQEAwICpDATBgNVHSUEDDAKBggr
+      BgEFBQcDATAPBgNVHRMBAf8EBTADAQH/MCkGA1UdEQQiMCCCDmxvY2FsaG9zdDo1
+      NDUzgg4xMjcuMC4wLjE6NTQ1MzAKBggqhkjOPQQDAgNIADBFAiEA2zpJEPQyz6/l
+      Wf86aX6PepsntZv2GYlA5UpabfT2EZICICpJ5h/iI+i341gBmLiAFQOyTDT+/wQc
+      6MF9+Yw1Yy0t
+      -----END CERTIFICATE-----
+    private_key_pem: |
+      -----BEGIN EC PRIVATE KEY-----
+      MHcCAQEEIIrYSSNQFaA2Hwf1duRSxKtLYX5CB04fSeQ6tF1aY/PuoAoGCCqGSM49
+      AwEHoUQDQgAEPR3tU2Fta9ktY+6P9G0cWO+0kETA6SFs38GecTyudlHz6xvCdz8q
+      EKTcWGekdmdDPsHloRNtsiCa697B2O9IFA==
+      -----END EC PRIVATE KEY-----
+  server_ca_pem: |
+    -----BEGIN CERTIFICATE-----
+    MIIBhTCCASugAwIBAgIQIRi6zePL6mKjOipn+dNuaTAKBggqhkjOPQQDAjASMRAw
+    DgYDVQQKEwdBY21lIENvMB4XDTE3MTAyMDE5NDMwNloXDTE4MTAyMDE5NDMwNlow
+    EjEQMA4GA1UEChMHQWNtZSBDbzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABD0d
+    7VNhbWvZLWPuj/RtHFjvtJBEwOkhbN/BnnE8rnZR8+sbwnc/KhCk3FhnpHZnQz7B
+    5aETbbIgmuvewdjvSBSjYzBhMA4GA1UdDwEB/wQEAwICpDATBgNVHSUEDDAKBggr
+    BgEFBQcDATAPBgNVHRMBAf8EBTADAQH/MCkGA1UdEQQiMCCCDmxvY2FsaG9zdDo1
+    NDUzgg4xMjcuMC4wLjE6NTQ1MzAKBggqhkjOPQQDAgNIADBFAiEA2zpJEPQyz6/l
+    Wf86aX6PepsntZv2GYlA5UpabfT2EZICICpJ5h/iI+i341gBmLiAFQOyTDT+/wQc
+    6MF9+Yw1Yy0t
+    -----END CERTIFICATE-----
+  device_token: "0000000000000000000000000000"
+
+ota:
+  - platform: thingsboard_mqtt_ota
+    thingsboard_id: thingsboard_component
+    chunk_size: 4096

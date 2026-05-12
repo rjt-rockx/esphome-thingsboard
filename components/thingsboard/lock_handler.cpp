@@ -33,7 +33,7 @@ RpcResult LockHandler::handle_rpc(const std::string &method, const std::string &
   }
 
   ESP_LOGD(TAG, "Lock %s: %s", entity_id.c_str(), method.c_str());
-  return {ESP_OK, build_state_json(obj)};
+  return {ESP_OK, this->build_state_json(obj)};
 }
 
 void LockHandler::register_shared_attributes(register_fn reg) {
@@ -88,9 +88,18 @@ void LockHandler::append_entity_discovery(JsonArray arr) const {
   }
 }
 
+void LockHandler::append_telemetry_fields(EntityBase *obj_base,
+                                          const TelemetryEmit &emit) {
+  auto *obj = static_cast<lock::Lock *>(obj_base);
+  emit_field(emit, "state", LOG_STR_ARG(lock::lock_state_to_string(obj->state)));
+}
+
 std::string LockHandler::build_state_json(lock::Lock *obj) {
-  return json::build_json([obj](JsonObject root) {
-    root["state"] = LOG_STR_ARG(lock::lock_state_to_string(obj->state));
+  return json::build_json([this, obj](JsonObject root) {
+    this->append_telemetry_fields(
+        obj, [&root](const std::string &k, const std::string &v) {
+          root[k] = serialized(v);
+        });
   });
 }
 

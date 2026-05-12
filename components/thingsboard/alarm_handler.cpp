@@ -49,7 +49,7 @@ RpcResult AlarmHandler::handle_rpc(const std::string &method, const std::string 
   }
 
   ESP_LOGD(TAG, "Alarm %s: %s", entity_id.c_str(), method.c_str());
-  return {ESP_OK, build_state_json(obj)};
+  return {ESP_OK, this->build_state_json(obj)};
 }
 
 void AlarmHandler::register_shared_attributes(register_fn reg) {
@@ -106,9 +106,20 @@ void AlarmHandler::append_entity_discovery(JsonArray arr) const {
   }
 }
 
+void AlarmHandler::append_telemetry_fields(EntityBase *obj_base,
+                                           const TelemetryEmit &emit) {
+  auto *obj = static_cast<alarm_control_panel::AlarmControlPanel *>(obj_base);
+  emit_field(emit, "state",
+             LOG_STR_ARG(alarm_control_panel::alarm_control_panel_state_to_string(
+                 obj->get_state())));
+}
+
 std::string AlarmHandler::build_state_json(alarm_control_panel::AlarmControlPanel *obj) {
-  return json::build_json([obj](JsonObject root) {
-    root["state"] = LOG_STR_ARG(alarm_control_panel::alarm_control_panel_state_to_string(obj->get_state()));
+  return json::build_json([this, obj](JsonObject root) {
+    this->append_telemetry_fields(
+        obj, [&root](const std::string &k, const std::string &v) {
+          root[k] = serialized(v);
+        });
   });
 }
 

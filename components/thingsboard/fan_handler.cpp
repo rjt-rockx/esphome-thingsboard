@@ -48,7 +48,7 @@ RpcResult FanHandler::handle_rpc(const std::string &method, const std::string &e
   }
 
   ESP_LOGD(TAG, "Fan %s: %s", entity_id.c_str(), method.c_str());
-  return {ESP_OK, build_state_json(obj)};
+  return {ESP_OK, this->build_state_json(obj)};
 }
 
 void FanHandler::register_shared_attributes(register_fn reg) {
@@ -124,14 +124,25 @@ void FanHandler::append_entity_discovery(JsonArray arr) const {
   }
 }
 
+void FanHandler::append_telemetry_fields(EntityBase *obj_base,
+                                         const TelemetryEmit &emit) {
+  auto *obj = static_cast<fan::Fan *>(obj_base);
+  emit_field(emit, "state", obj->state ? "ON" : "OFF");
+  emit_field(emit, "speed", obj->speed);
+  emit_field(emit, "oscillating", obj->oscillating);
+  emit_field(emit, "direction",
+             LOG_STR_ARG(fan::fan_direction_to_string(obj->direction)));
+  if (obj->has_preset_mode()) {
+    emit_field(emit, "preset_mode", obj->get_preset_mode());
+  }
+}
+
 std::string FanHandler::build_state_json(fan::Fan *obj) {
-  return json::build_json([obj](JsonObject root) {
-    root["state"] = obj->state ? "ON" : "OFF";
-    root["speed"] = obj->speed;
-    root["oscillating"] = obj->oscillating;
-    root["direction"] = LOG_STR_ARG(fan::fan_direction_to_string(obj->direction));
-    if (obj->has_preset_mode())
-      root["preset_mode"] = obj->get_preset_mode();
+  return json::build_json([this, obj](JsonObject root) {
+    this->append_telemetry_fields(
+        obj, [&root](const std::string &k, const std::string &v) {
+          root[k] = serialized(v);
+        });
   });
 }
 

@@ -99,9 +99,15 @@ class ThingsBoardMQTT : public TBTransport {
   void parse_attribute_response(const char *topic, const char *payload);
 
   // Schedules `func` for the next main-loop tick via App.scheduler. Used to
-  // hop user-callback dispatch off the ESP-MQTT event task — everything
+  // hop user-callback dispatch off the ESP-MQTT event task. Everything
   // downstream of the callback assumes the ESPHome loop thread.
   void dispatch_on_loop_(std::function<void()> &&func);
+
+  // True when either client X.509 auth or a server CA pin is configured. Drives
+  // the TCP-vs-SSL transport selection passed into ESP-MQTT.
+  bool tls_enabled_() const;
+  void apply_broker_address_(esp_mqtt_client_config_t &cfg) const;
+  void apply_credentials_(esp_mqtt_client_config_t &cfg) const;
 
   Component *parent_{nullptr};
 
@@ -110,7 +116,6 @@ class ThingsBoardMQTT : public TBTransport {
   std::string device_token_;
   std::string client_id_;
   std::string username_; // For provisioning (set to "provision")
-  std::string broker_uri_;  // Store the URI to prevent lifetime issues
 
   esp_mqtt_client_handle_t mqtt_client_{nullptr};
   bool connected_{false};

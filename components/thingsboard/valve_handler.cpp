@@ -50,7 +50,7 @@ RpcResult ValveHandler::handle_rpc(const std::string &method, const std::string 
   }
 
   ESP_LOGD(TAG, "Valve %s: %s", entity_id.c_str(), method.c_str());
-  return {ESP_OK, build_state_json(obj)};
+  return {ESP_OK, this->build_state_json(obj)};
 }
 
 void ValveHandler::register_shared_attributes(register_fn reg) {
@@ -107,10 +107,20 @@ void ValveHandler::append_entity_discovery(JsonArray arr) const {
   }
 }
 
+void ValveHandler::append_telemetry_fields(EntityBase *obj_base,
+                                           const TelemetryEmit &emit) {
+  auto *obj = static_cast<valve::Valve *>(obj_base);
+  emit_field(emit, "position", obj->position);
+  emit_field(emit, "current_operation",
+             LOG_STR_ARG(valve::valve_operation_to_str(obj->current_operation)));
+}
+
 std::string ValveHandler::build_state_json(valve::Valve *obj) {
-  return json::build_json([obj](JsonObject root) {
-    root["position"] = obj->position;
-    root["current_operation"] = LOG_STR_ARG(valve::valve_operation_to_str(obj->current_operation));
+  return json::build_json([this, obj](JsonObject root) {
+    this->append_telemetry_fields(
+        obj, [&root](const std::string &k, const std::string &v) {
+          root[k] = serialized(v);
+        });
   });
 }
 
