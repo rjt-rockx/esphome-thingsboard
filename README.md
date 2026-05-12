@@ -70,6 +70,58 @@ ota:
     http_request_id: tb_http
 ```
 
+## Picking a transport
+
+| Use case | Pick |
+| --- | --- |
+| Fleets above ~100 devices, sub-second telemetry, RPC + shared attribute push | `thingsboard_mqtt` |
+| One-off devices, polling cadence above a few seconds, restrictive network | `thingsboard_http` |
+
+MQTT keeps a persistent broker session, so the server can push RPC and
+shared-attribute updates without the device polling. HTTP uses long-poll
+under the hood: each device holds an open request to TB for up to
+`poll_timeout`, which costs more per-device server resources at scale.
+
+## TLS
+
+TLS is opt-in on both transports.
+
+**MQTT** — supply server CA, client certificate, or both via
+`thingsboard_mqtt:`. Port defaults to `8883` when any TLS material is
+present, `1883` otherwise.
+
+```yaml
+thingsboard_mqtt:
+  thingsboard_id: thingsboard_component
+  broker: !secret thingsboard_mqtt_broker
+  # port: 8883          # optional: derived from TLS presence
+  server_ca_pem: !secret thingsboard_server_ca   # for ACCESS_TOKEN over TLS
+  credentials:                                   # for X.509 mTLS
+    type: X509_CERTIFICATE
+    certificate_pem: !secret tb_client_cert
+    private_key_pem: !secret tb_client_key
+  device_token: !secret thingsboard_device_token  # ignored when X509
+```
+
+`server_ca_pem` alone enables TLS with `ACCESS_TOKEN` or `MQTT_BASIC` auth
+(no client cert). `X509_CERTIFICATE` requires both `certificate_pem` and
+`private_key_pem`; `server_ca_pem` is recommended alongside it.
+
+**HTTP** — TLS material lives on the parent `http_request:` component
+(provided by ESPHome itself). The `thingsboard_http:` block reuses
+whatever the `http_request:` it points at is configured with:
+
+```yaml
+http_request:
+  id: tb_http
+  timeout: 10s
+  verify_ssl: true
+  ca_certificate: !secret thingsboard_server_ca
+```
+
+Set `verify_ssl: false` only for local TB instances with self-signed
+material that you can't get a copy of, never in production.
+
 ## Versioning
 
 Tags are semver-ish: `vMAJOR.MINOR.PATCH`. Pin to a tag, not `@main`, so
