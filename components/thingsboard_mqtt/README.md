@@ -17,8 +17,18 @@ thingsboard:
 thingsboard_mqtt:
   thingsboard_id: thingsboard_component
   broker: !secret thingsboard_mqtt_broker
-  port: 1883
+  # port: 8883            # optional: defaults to 8883 when TLS material
+                          # below is present, 1883 otherwise.
   device_token: !secret tb_device_token # optional if `provisioning:` set
+  # Optional TLS material. `server_ca_pem` enables TLS with ACCESS_TOKEN or
+  # MQTT_BASIC auth; X509_CERTIFICATE credentials require both
+  # certificate_pem and private_key_pem. See the top-level README for the
+  # full TLS surface.
+  server_ca_pem: !secret tb_server_ca
+  credentials:
+    type: X509_CERTIFICATE
+    certificate_pem: !secret tb_client_cert
+    private_key_pem: !secret tb_client_key
   provisioning:
     key: !secret tb_provisioning_key
     secret: !secret tb_provisioning_secret
