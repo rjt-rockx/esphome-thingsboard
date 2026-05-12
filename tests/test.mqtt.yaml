@@ -1,0 +1,47 @@
+# Compile-test config for the MQTT transport + OTA platform.
+# Exercises the codegen path; not intended to run against a real broker.
+
+esphome:
+  name: tb-mqtt-test
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - thingsboard
+      - thingsboard_mqtt
+      - thingsboard_mqtt_ota
+
+logger:
+
+wifi:
+  ssid: "test"
+  password: "testtesttest"
+
+# Required transitively by the core component; declared here so the
+# consumer can pick the timeout. (Even MQTT-only firmware needs it
+# today — the core uses esp_http_client for HTTP provisioning.)
+http_request:
+  id: tb_http
+  timeout: 10s
+
+thingsboard:
+  id: thingsboard_component
+  server_url: "https://demo.thingsboard.io"
+
+thingsboard_mqtt:
+  thingsboard_id: thingsboard_component
+  broker: "demo.thingsboard.io"
+  port: 1883
+  device_token: "0000000000000000000000000000"
+
+ota:
+  - platform: thingsboard_mqtt_ota
+    thingsboard_id: thingsboard_component
+    chunk_size: 4096

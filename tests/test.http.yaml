@@ -1,0 +1,45 @@
+# Compile-test config for the HTTP transport + OTA platform.
+# Exercises the codegen path; not intended to run against a real server.
+
+esphome:
+  name: tb-http-test
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - thingsboard
+      - thingsboard_http
+      - thingsboard_http_ota
+
+logger:
+
+wifi:
+  ssid: "test"
+  password: "testtesttest"
+
+http_request:
+  id: tb_http
+  timeout: 10s
+
+thingsboard:
+  id: thingsboard_component
+  server_url: "https://demo.thingsboard.io"
+
+thingsboard_http:
+  thingsboard_id: thingsboard_component
+  http_request_id: tb_http
+  device_token: "0000000000000000000000000000"
+  poll_interval: 3s
+  poll_timeout: 3s
+
+ota:
+  - platform: thingsboard_http_ota
+    thingsboard_id: thingsboard_component
+    http_request_id: tb_http
