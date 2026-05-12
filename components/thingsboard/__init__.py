@@ -103,6 +103,7 @@ FINAL_VALIDATE_SCHEMA = _final_validate
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
+    CORE.register_controller()
 
     if CONF_HTTP_REQUEST_ID in config:
         await cg.register_parented(var, config[CONF_HTTP_REQUEST_ID])

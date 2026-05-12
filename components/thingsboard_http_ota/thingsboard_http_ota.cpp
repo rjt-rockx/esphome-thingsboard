@@ -154,8 +154,18 @@ bool ThingsBoardHttpOtaComponent::start_firmware_download_(
   std::string firmware_url = this->build_firmware_url_(title, version);
   ESP_LOGI(TAG, "Starting firmware download from: %s", firmware_url.c_str());
 
-  this->report_fw_info(ESPHOME_PROJECT_NAME, ESPHOME_PROJECT_VERSION, title,
-                       version, this->update_attempt_);
+#ifdef ESPHOME_PROJECT_NAME
+  const char *current_fw_title = ESPHOME_PROJECT_NAME;
+#else
+  const char *current_fw_title = "";
+#endif
+#ifdef ESPHOME_PROJECT_VERSION
+  const char *current_fw_version = ESPHOME_PROJECT_VERSION;
+#else
+  const char *current_fw_version = ESPHOME_VERSION;
+#endif
+  this->report_fw_info(current_fw_title, current_fw_version, title, version,
+                       this->update_attempt_);
   this->report_fw_status("DOWNLOADING", "Starting firmware download", 0);
 
   std::list<http_request::Header> headers;
