@@ -1,6 +1,6 @@
 #include "thingsboard_http_transport.h"
 
-#include <list>
+#include <vector>
 
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/thingsboard/thingsboard_client.h"
@@ -109,7 +109,7 @@ bool ThingsBoardHttpTransport::post_(const std::string &url,
     ESP_LOGW(TAG, "HTTP parent unset, cannot POST %s", url.c_str());
     return false;
   }
-  std::list<http_request::Header> headers = {
+  std::vector<http_request::Header> headers = {
       {"Content-Type", "application/json"},
       {"Connection", "keep-alive"},
   };
@@ -142,7 +142,7 @@ bool ThingsBoardHttpTransport::get_(const std::string &url,
     ESP_LOGW(TAG, "HTTP parent unset, cannot GET %s", url.c_str());
     return false;
   }
-  std::list<http_request::Header> headers = {
+  std::vector<http_request::Header> headers = {
       {"Connection", "keep-alive"},
   };
   auto container = this->http_->get(url, headers);

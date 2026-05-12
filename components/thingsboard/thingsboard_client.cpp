@@ -362,7 +362,9 @@ void ThingsBoardComponent::send_device_metadata_() {
     root["current_fw_version"] = ESPHOME_PROJECT_VERSION;
 #endif
 
-    root["device.compilation_time"] = App.get_compilation_time();
+    char build_time_buf[esphome::Application::BUILD_TIME_STR_SIZE];
+    App.get_build_time_string(build_time_buf);
+    root["device.compilation_time"] = build_time_buf;
 
 #if defined(USE_WIFI)
     root["device.network_type"] = "wifi";
@@ -382,7 +384,9 @@ void ThingsBoardComponent::send_device_metadata_() {
         std::string key = (index == 0)
                               ? "device.ip_address"
                               : "device.ip_address_" + esphome::to_string(index);
-        root[key] = ip.str();
+        char ip_buf[network::IP_ADDRESS_BUFFER_SIZE];
+        ip.str_to(ip_buf);
+        root[key] = ip_buf;
         index++;
         if (index >= 5)
           break;
@@ -516,7 +520,7 @@ bool ThingsBoardComponent::provision_device_http_() {
   ESP_LOGV(TAG, "Provisioning URL: %s", provision_url.c_str());
   ESP_LOGV(TAG, "Provisioning payload: %s", payload.c_str());
 
-  std::list<http_request::Header> headers;
+  std::vector<http_request::Header> headers;
   headers.push_back({"Content-Type", "application/json"});
   headers.push_back({"Connection", "close"});
 

@@ -168,7 +168,7 @@ bool ThingsBoardHttpOtaComponent::start_firmware_download_(
                        this->update_attempt_);
   this->report_fw_status("DOWNLOADING", "Starting firmware download", 0);
 
-  std::list<http_request::Header> headers;
+  std::vector<http_request::Header> headers;
   headers.push_back({"User-Agent", "ESPHome-ThingsBoard-OTA/1.0"});
   headers.push_back({"Connection", "close"});
 
