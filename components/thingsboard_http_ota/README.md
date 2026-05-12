@@ -48,5 +48,5 @@ Standard ESPHome OTA triggers (`on_begin` / `on_progress` / `on_end` /
    `UPDATING` → `UPDATED`, or `FAILED` with `fw_error`) are reported back as
    telemetry so ThingsBoard's firmware dashboard can track progress.
 
-There is no chunk-size schema knob — the response body is read in fixed
+There is no chunk-size schema knob: the response body is read in fixed
 512-byte buffers regardless of payload.

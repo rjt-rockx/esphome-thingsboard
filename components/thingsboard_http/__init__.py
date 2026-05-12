@@ -5,7 +5,7 @@ Implements the ThingsBoard HTTP device API
 attribute upload, attribute long-poll, server-side RPC long-poll,
 client-side RPC, claim, provisioning.
 
-End firmware uses either ``thingsboard_mqtt:`` or ``thingsboard_http:`` —
+End firmware uses either ``thingsboard_mqtt:`` or ``thingsboard_http:``,
 never both. The core component enforces this via FINAL_VALIDATE_SCHEMA.
 """
 

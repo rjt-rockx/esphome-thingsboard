@@ -26,7 +26,7 @@ wifi:
 
 # Required transitively by the core component; declared here so the
 # consumer can pick the timeout. (Even MQTT-only firmware needs it
-# today — the core uses esp_http_client for HTTP provisioning.)
+# today, since the core uses esp_http_client for HTTP provisioning.)
 http_request:
   id: tb_http
   timeout: 10s

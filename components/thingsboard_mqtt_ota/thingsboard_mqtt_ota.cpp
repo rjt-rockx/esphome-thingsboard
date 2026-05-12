@@ -36,7 +36,7 @@ void ThingsBoardMqttOtaComponent::setup() {
   if (this->transport_ != nullptr) {
     this->transport_->set_ota_handler(this);
   } else {
-    ESP_LOGE(TAG, "MQTT transport handle not available — OTA will not function");
+    ESP_LOGE(TAG, "MQTT transport handle not available; OTA will not function");
   }
 }
 
@@ -71,7 +71,7 @@ void ThingsBoardMqttOtaComponent::on_firmware_advertised(
     return;
   }
   if (this->transport_ == nullptr) {
-    ESP_LOGE(TAG, "No MQTT transport bound — cannot start OTA");
+    ESP_LOGE(TAG, "No MQTT transport bound; cannot start OTA");
     return;
   }
   this->fw_ = info;
@@ -128,7 +128,7 @@ void ThingsBoardMqttOtaComponent::on_chunk_received(uint32_t request_id, uint32_
     return;
   }
   if (chunk_idx != this->next_chunk_idx_) {
-    ESP_LOGW(TAG, "Out-of-order chunk %u (expected %u) — abort", chunk_idx,
+    ESP_LOGW(TAG, "Out-of-order chunk %u (expected %u); aborting", chunk_idx,
              this->next_chunk_idx_);
     this->fail_("Out-of-order chunk");
     return;

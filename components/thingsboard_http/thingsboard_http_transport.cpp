@@ -36,7 +36,7 @@ void ThingsBoardHttpTransport::setup() {
   this->out_mutex_ = xSemaphoreCreateMutex();
   this->in_mutex_ = xSemaphoreCreateMutex();
   this->token_mutex_ = xSemaphoreCreateMutex();
-  // Binary wake signal — worker takes, main gives on every enqueue. Used
+  // Binary wake signal: worker takes, main gives on every enqueue. Used
   // with a timeout so the worker also wakes periodically for polling.
   this->worker_wake_ = xSemaphoreCreateBinary();
 
@@ -151,7 +151,7 @@ bool ThingsBoardHttpTransport::get_(const std::string &url,
     return false;
   }
   bool ok = container->status_code >= 200 && container->status_code < 300;
-  // 408 is "no events in long-poll window" — not an error
+  // 408 is "no events in long-poll window", not an error
   if (container->status_code == 408)
     ok = true;
   if (resp_out != nullptr && ok && container->status_code == 200) {
@@ -278,7 +278,7 @@ void ThingsBoardHttpTransport::worker_task_entry_(void *arg) {
 void ThingsBoardHttpTransport::worker_loop_() {
 #ifdef USE_ESP32
   for (;;) {
-    // Wait for outbound work or the poll interval — whichever fires first.
+    // Wait for outbound work or the poll interval, whichever fires first.
     // Binary wake coalesces multiple enqueues into one wake; the drain loop
     // below catches everything that landed in the meantime.
     xSemaphoreTake(this->worker_wake_, pdMS_TO_TICKS(this->poll_interval_ms_));
@@ -513,7 +513,7 @@ void ThingsBoardHttpTransport::enqueue_out_(OutMsg msg) {
   xSemaphoreTake(this->out_mutex_, portMAX_DELAY);
   this->out_queue_.push(std::move(msg));
   xSemaphoreGive(this->out_mutex_);
-  // give-while-given is a no-op on a binary sem — gives us free coalescing.
+  // give-while-given is a no-op on a binary sem, which gives us free coalescing.
   xSemaphoreGive(this->worker_wake_);
 #else
   this->out_queue_.push(std::move(msg));

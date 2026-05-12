@@ -4,8 +4,8 @@ MQTT transport for the [`thingsboard`](../thingsboard/) ESPHome custom component
 Implements ThingsBoard's MQTT device API as documented at
 <https://thingsboard.io/docs/reference/mqtt-api/>.
 
-End firmware uses **either** `thingsboard_mqtt:` **or** `thingsboard_http:` — never
-both. The core component enforces this via its `FINAL_VALIDATE_SCHEMA`.
+End firmware uses **either** `thingsboard_mqtt:` **or** `thingsboard_http:`,
+never both. The core component enforces this via its `FINAL_VALIDATE_SCHEMA`.
 
 ## YAML
 
@@ -32,7 +32,7 @@ thingsboard_mqtt:
   provisioning:
     key: !secret tb_provisioning_key
     secret: !secret tb_provisioning_secret
-    # credentials variants — see TB device-provisioning docs
+    # credentials variants (see TB device-provisioning docs)
 ```
 
 ## TB device API coverage
@@ -48,16 +48,16 @@ thingsboard_mqtt:
 | Client-side RPC (device→TB)       | live          | `send_rpc_request` action                      |
 | `getSessionLimits`                | live          | called automatically post-connect              |
 | Device claim                      | live          | `claim_device` action                          |
-| Provisioning — server token       | live          |                                                |
-| Provisioning — device token       | payload wired | `credentialsType:"ACCESS_TOKEN"` + `token`     |
-| Provisioning — `MQTT_BASIC`       | payload wired | `clientId`/`username`/`password`               |
-| Provisioning — `X509_CERTIFICATE` | payload wired | `hash` (cert PEM)                              |
+| Provisioning, server token        | live          |                                                |
+| Provisioning, device token        | payload wired | `credentialsType:"ACCESS_TOKEN"` + `token`     |
+| Provisioning, `MQTT_BASIC`        | payload wired | `clientId`/`username`/`password`               |
+| Provisioning, `X509_CERTIFICATE`  | payload wired | `hash` (cert PEM)                              |
 | OTA over MQTT (`v2/fw/*`)         | live          | chunked binary, see `../thingsboard_mqtt_ota/` |
 | SOTA (software updates)           | unsupported   |                                                |
 | Gateway protocol                  | out-of-scope  | device firmware, not a gateway                 |
-| Auth — access token               | live          | `username = $TOKEN` in CONNECT                 |
-| Auth — X.509 mTLS                 | live          | `set_client_certificate` + `set_server_ca`     |
-| Auth — `MQTT_BASIC`               | live          | `set_basic_credentials`                        |
+| Auth, access token                | live          | `username = $TOKEN` in CONNECT                 |
+| Auth, X.509 mTLS                  | live          | `set_client_certificate` + `set_server_ca`     |
+| Auth, `MQTT_BASIC`                | live          | `set_basic_credentials`                        |
 
 ## Credential rotation
 

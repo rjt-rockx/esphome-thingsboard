@@ -97,7 +97,7 @@ def _final_validate(config):
         transports.append("thingsboard_http")
     if len(transports) == 0:
         raise cv.Invalid(
-            "thingsboard: requires exactly one transport — add a "
+            "thingsboard: requires exactly one transport. Add a "
             "`thingsboard_mqtt:` or `thingsboard_http:` block to your YAML."
         )
     if len(transports) > 1:

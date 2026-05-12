@@ -72,7 +72,7 @@ ThingsBoardMQTT::ThingsBoardMQTT() {}
 
 ThingsBoardMQTT::~ThingsBoardMQTT() {
   // Destruction runs at shutdown from a non-mqtt task, so stop+destroy is safe here
-  // (unlike from inside the mqtt task — see disconnect()).
+  // (unlike from inside the mqtt task; see disconnect()).
   if (this->mqtt_client_ != nullptr) {
     esp_mqtt_client_stop(this->mqtt_client_);
     esp_mqtt_client_destroy(this->mqtt_client_);
@@ -83,7 +83,7 @@ ThingsBoardMQTT::~ThingsBoardMQTT() {
 void ThingsBoardMQTT::dispatch_on_loop_(std::function<void()> &&func) {
   if (this->parent_ == nullptr) {
     // No scheduler anchor (test/provisioning paths before set_parent_component);
-    // fall back to direct invocation — same behaviour as before this hop existed.
+    // fall back to direct invocation (same behaviour as before this hop existed).
     func();
     return;
   }
@@ -589,7 +589,7 @@ void ThingsBoardMQTT::handle_mqtt_event(esp_mqtt_event_handle_t event) {
 
         // OTA chunks travel as binary payloads on `v2/fw/response/{rid}/chunk/{idx}`;
         // route them before the null-terminated payload copy used by JSON paths.
-        // ESP-MQTT splits messages larger than buffer.size across events — earlier
+        // ESP-MQTT splits messages larger than buffer.size across events; earlier
         // fragments are not preserved, so we only dispatch when the payload is whole.
         if (strncmp(topic, "v2/fw/response/", 15) == 0) {
           if (this->ota_handler_ != nullptr &&
@@ -608,7 +608,7 @@ void ThingsBoardMQTT::handle_mqtt_event(esp_mqtt_event_handle_t event) {
               // fragment; fail loud rather than write a truncated image.
               if (event->current_data_offset != 0) {
                 ESP_LOGE(TAG,
-                         "OTA chunk %u fragmented (offset=%d, total=%d) — "
+                         "OTA chunk %u fragmented (offset=%d, total=%d): "
                          "buffer too small",
                          idx, event->current_data_offset,
                          event->total_data_len);

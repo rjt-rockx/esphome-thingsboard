@@ -4,8 +4,8 @@ HTTP transport for the [`thingsboard`](../thingsboard/) ESPHome custom component
 Implements ThingsBoard's HTTP device API as documented at
 <https://thingsboard.io/docs/reference/http-api/>.
 
-End firmware uses **either** `thingsboard_mqtt:` **or** `thingsboard_http:` — never
-both. The core component enforces this via its `FINAL_VALIDATE_SCHEMA`.
+End firmware uses **either** `thingsboard_mqtt:` **or** `thingsboard_http:`,
+never both. The core component enforces this via its `FINAL_VALIDATE_SCHEMA`.
 
 ## YAML
 
@@ -33,7 +33,7 @@ thingsboard_http:
 dedicated worker task, so `poll_timeout` is bounded by `http_request`'s
 socket timeout rather than the system WDT.
 
-Set `poll_timeout: 0s` for pure short-poll — TB returns immediately and
+Set `poll_timeout: 0s` for pure short-poll: TB returns immediately and
 each request completes in one network round-trip. Trade-off:
 shared-attribute pushes only flush _during_ an active poll, so a
 short-poll firmware can silently miss changes between cadence ticks. The
@@ -56,11 +56,11 @@ references.
 | Server-side RPC (TB→device, long-poll) | implemented   | GET `/api/v1/$TOKEN/rpc?timeout=<poll_timeout>`; response POST `/api/v1/$TOKEN/rpc/$id` |
 | Client-side RPC (device→TB)            | implemented   | POST `/api/v1/$TOKEN/rpc`; sync response body re-dispatched                             |
 | Device claim                           | implemented   | POST `/api/v1/$TOKEN/claim`                                                             |
-| Provisioning — server token            | implemented   | POST `/api/v1/provision`                                                                |
-| Provisioning — device token            | implemented   | same endpoint + `credentials.accessToken`                                               |
+| Provisioning, server token             | implemented   | POST `/api/v1/provision`                                                                |
+| Provisioning, device token             | implemented   | same endpoint + `credentials.accessToken`                                               |
 | OTA over HTTPS (streaming GET)         | implemented   | sibling [`thingsboard_http_ota`](../thingsboard_http_ota/)                              |
-| Auth — access token                    | implemented   | path/query `/api/v1/$TOKEN/...`                                                         |
+| Auth, access token                     | implemented   | path/query `/api/v1/$TOKEN/...`                                                         |
 | Long-poll timeout semantics            | implemented   | `timeout=<poll_timeout>` on `/rpc` and `/attributes/updates`                            |
 | `getSessionLimits`                     | not supported | not exposed in TB's HTTP API                                                            |
-| Provisioning — `MQTT_BASIC`, `X509`    | not supported | not exposed in TB's HTTP API                                                            |
-| Auth — X.509 mTLS, `MQTT_BASIC`        | not supported | MQTT-only TB features                                                                   |
+| Provisioning, `MQTT_BASIC` / `X509`    | not supported | not exposed in TB's HTTP API                                                            |
+| Auth, X.509 mTLS / `MQTT_BASIC`        | not supported | MQTT-only TB features                                                                   |

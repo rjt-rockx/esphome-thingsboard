@@ -2,8 +2,8 @@
 
 ESPHome external components for [ThingsBoard](https://thingsboard.io) IoT
 platform integration. End-to-end support for the ThingsBoard device API
-over MQTT or HTTP — telemetry, attributes, RPC, provisioning, claiming,
-and OTA — wired through ESPHome's entity discovery so per-component
+over MQTT or HTTP (telemetry, attributes, RPC, provisioning, claiming,
+OTA), wired through ESPHome's entity discovery so per-component
 telemetry and RPC come for free.
 
 ## Components
@@ -16,12 +16,12 @@ telemetry and RPC come for free.
 | `thingsboard_http` | HTTP device API ([ref](https://thingsboard.io/docs/reference/http-api/)) |
 | `thingsboard_http_ota` | Streaming HTTPS OTA, exposed as an `ota:` platform |
 
-A firmware uses **exactly one** of `thingsboard_mqtt:` or `thingsboard_http:`
-— the core component's final-validator rejects builds that configure both
+A firmware uses **exactly one** of `thingsboard_mqtt:` or `thingsboard_http:`.
+The core component's final-validator rejects builds that configure both
 or neither. See each component's README under `components/` for the YAML
 surface and the implemented slice of the ThingsBoard device API.
 
-## Quick start — MQTT
+## Quick start: MQTT
 
 ```yaml
 external_components:
@@ -42,7 +42,7 @@ ota:
     thingsboard_id: thingsboard_component
 ```
 
-## Quick start — HTTP
+## Quick start: HTTP
 
 ```yaml
 external_components:
@@ -86,7 +86,7 @@ under the hood: each device holds an open request to TB for up to
 
 TLS is opt-in on both transports.
 
-**MQTT** — supply server CA, client certificate, or both via
+**MQTT**: supply server CA, client certificate, or both via
 `thingsboard_mqtt:`. Port defaults to `8883` when any TLS material is
 present, `1883` otherwise.
 
@@ -107,7 +107,7 @@ thingsboard_mqtt:
 (no client cert). `X509_CERTIFICATE` requires both `certificate_pem` and
 `private_key_pem`; `server_ca_pem` is recommended alongside it.
 
-**HTTP** — TLS material lives on the parent `http_request:` component
+**HTTP**: TLS material lives on the parent `http_request:` component
 (provided by ESPHome itself). The `thingsboard_http:` block reuses
 whatever the `http_request:` it points at is configured with:
 
@@ -136,6 +136,14 @@ pulls in `espressif/mqtt` for IDF ≥ 6.0 or the built-in `mqtt` component
 for older IDF. The HTTP transport uses ESPHome's `http_request`
 component and its `esp_http_client` backend.
 
+## AI assistance
+
+Substantial parts of this codebase were drafted with AI assistance
+(Claude Code). The author reviews, tests, and integrates every change
+on real ESP32 hardware against a live ThingsBoard instance before it
+lands on `main`, but treat the resulting code with the usual scepticism
+you'd apply to any third-party component: read it before you ship it.
+
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT. See [`LICENSE`](LICENSE).

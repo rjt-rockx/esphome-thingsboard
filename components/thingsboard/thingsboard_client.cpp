@@ -801,7 +801,7 @@ void ThingsBoardComponent::dispatch_connected() {
     this->initial_state_iterator_->begin(/*include_internal=*/true);
   }
   // Snapshot fw_*/sw_* attributes so a TB-side OTA assignment that pre-dated
-  // this connection — or raced the shared-attr push window — still reaches the
+  // this connection (or raced the shared-attr push window) still reaches the
   // OTA bridge.
   if (this->ota_transport_ != nullptr) {
     this->request_attributes(

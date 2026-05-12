@@ -456,7 +456,7 @@ protected:
   // https://thingsboard.io/docs/reference/mqtt-api/#device-provisioning
   bool provision_device_mqtt_();
   bool provision_device_http_();
-  // HTTP-only — MQTT provisioning completes via callback.
+  // HTTP-only; MQTT provisioning completes via callback.
   void check_provisioning_status_();
   void handle_provision_response_(const std::string &response);
   void establish_connection_();

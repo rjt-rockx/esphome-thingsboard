@@ -19,8 +19,8 @@ struct FirmwareInfo {
 };
 
 // Optional OTA surface a transport may implement. Implementations report state
-// transitions back through telemetry on the owning transport — `fw_state` ∈
-// {DOWNLOADING, DOWNLOADED, VERIFIED, UPDATING, UPDATED, FAILED}.
+// transitions back through telemetry on the owning transport: `fw_state` is
+// one of {DOWNLOADING, DOWNLOADED, VERIFIED, UPDATING, UPDATED, FAILED}.
 class TBOTATransport {
  public:
   virtual ~TBOTATransport() = default;

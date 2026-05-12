@@ -19,7 +19,7 @@ thingsboard_mqtt:
 ota:
   - platform: thingsboard_mqtt_ota
     thingsboard_id: thingsboard_component
-    chunk_size: 4096   # optional, default 4096, range 512–65536
+    chunk_size: 4096   # optional, default 4096, range 512-65536
     on_begin: ...
     on_progress: ...
     on_end: ...
@@ -46,6 +46,6 @@ Standard ESPHome OTA triggers (`on_begin` / `on_progress` / `on_end` /
 ## `chunk_size`
 
 `chunk_size` is bounded by the broker's `maxPayloadSize` limit (see
-`getSessionLimits` — exposed in the core component's diagnostic text
+`getSessionLimits`, exposed in the core component's diagnostic text
 sensor). 4 KiB is the ThingsBoard default and works for all known broker
 configurations.

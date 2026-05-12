@@ -120,8 +120,8 @@ class ThingsBoardMQTT : public TBTransport {
   esp_mqtt_client_handle_t mqtt_client_{nullptr};
   bool connected_{false};
   bool provisioning_mode_{false};
-  // Username last pushed into esp-mqtt config — used to detect credential rotation
-  // and re-push the config before requesting reconnect.
+  // Username last pushed into esp-mqtt config; used to detect credential rotation
+  // so we can re-push the config before requesting reconnect.
   std::string pushed_username_;
 
   bool use_basic_{false};

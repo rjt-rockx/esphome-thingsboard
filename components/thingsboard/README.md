@@ -5,8 +5,8 @@ the batch builder, attribute cache, RPC dispatch, OTA state machine, and the
 ESPHome action surface (`thingsboard.send_telemetry`, etc.). The actual wire
 protocol lives in sibling components:
 
-- [`thingsboard_mqtt`](../thingsboard_mqtt/) — MQTT device API
-- [`thingsboard_http`](../thingsboard_http/) — HTTP device API
+- [`thingsboard_mqtt`](../thingsboard_mqtt/): MQTT device API
+- [`thingsboard_http`](../thingsboard_http/): HTTP device API
 
 End firmware uses **exactly one** transport. The core's `FINAL_VALIDATE_SCHEMA`
 rejects the YAML if zero or both transports are configured.
@@ -75,7 +75,7 @@ same shape.
 +-----------------+              +-------------------+
 ```
 
-Core never touches an ESP-MQTT client or `esp_http_client` directly — every
+Core never touches an ESP-MQTT client or `esp_http_client` directly. Every
 protocol-level operation goes through `TBTransport`. Transport instances
 register themselves with the core during their own `to_code()` /
 `setup()` and are owned by their respective components.
@@ -104,8 +104,8 @@ see their READMEs for endpoint detail.
 
 ## Files
 
-- `transport.h` — `TBTransport` interface implemented by each transport
-- `thingsboard_client.h/.cpp` — core component (batch builder, RPC dispatch,
+- `transport.h`: `TBTransport` interface implemented by each transport
+- `thingsboard_client.h/.cpp`: core component (batch builder, RPC dispatch,
   OTA state machine, action surface)
-- `*_handler.cpp` — transport-agnostic domain handlers (switch, climate, …)
-- `control_iterator.cpp` — RPC dispatch + shared-attribute fan-out
+- `*_handler.cpp`: transport-agnostic domain handlers (switch, climate, etc.)
+- `control_iterator.cpp`: RPC dispatch + shared-attribute fan-out
