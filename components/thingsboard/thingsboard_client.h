@@ -7,7 +7,6 @@
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/component_iterator.h"
-#include "esphome/core/controller.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 #include "esphome/core/preferences.h"
@@ -38,7 +37,6 @@ class ThingsBoardMQTT;
 
 class ThingsBoardComponent
     : public Component,
-      public Controller,
       public Parented<http_request::HttpRequestComponent> {
 public:
   ThingsBoardComponent();
@@ -303,71 +301,68 @@ public:
 #endif
 
 #ifdef USE_SENSOR
-  void on_sensor_update(sensor::Sensor *obj) override;
+  void on_sensor_update(sensor::Sensor *obj);
 #endif
 #ifdef USE_BINARY_SENSOR
-  void on_binary_sensor_update(binary_sensor::BinarySensor *obj) override;
+  void on_binary_sensor_update(binary_sensor::BinarySensor *obj);
 #endif
 #ifdef USE_SWITCH
-  void on_switch_update(switch_::Switch *obj) override;
+  void on_switch_update(switch_::Switch *obj);
 #endif
 #ifdef USE_NUMBER
-  void on_number_update(number::Number *obj) override;
+  void on_number_update(number::Number *obj);
 #endif
 #ifdef USE_SELECT
-  void on_select_update(select::Select *obj) override;
+  void on_select_update(select::Select *obj);
 #endif
 #ifdef USE_TEXT_SENSOR
-  void on_text_sensor_update(text_sensor::TextSensor *obj) override;
+  void on_text_sensor_update(text_sensor::TextSensor *obj);
 #endif
 #ifdef USE_FAN
-  void on_fan_update(fan::Fan *obj) override;
+  void on_fan_update(fan::Fan *obj);
 #endif
 #ifdef USE_LIGHT
-  void on_light_update(light::LightState *obj) override;
+  void on_light_update(light::LightState *obj);
 #endif
 #ifdef USE_COVER
-  void on_cover_update(cover::Cover *obj) override;
+  void on_cover_update(cover::Cover *obj);
 #endif
 #ifdef USE_CLIMATE
-  void on_climate_update(climate::Climate *obj) override;
+  void on_climate_update(climate::Climate *obj);
 #endif
 #ifdef USE_LOCK
-  void on_lock_update(lock::Lock *obj) override;
+  void on_lock_update(lock::Lock *obj);
 #endif
 #ifdef USE_VALVE
-  void on_valve_update(valve::Valve *obj) override;
+  void on_valve_update(valve::Valve *obj);
 #endif
 #ifdef USE_TEXT
-  void on_text_update(text::Text *obj, const std::string &state) override;
+  void on_text_update(text::Text *obj);
 #endif
 #ifdef USE_DATETIME_DATE
-  void on_date_update(datetime::DateEntity *obj) override;
+  void on_date_update(datetime::DateEntity *obj);
 #endif
 #ifdef USE_DATETIME_TIME
-  void on_time_update(datetime::TimeEntity *obj) override;
+  void on_time_update(datetime::TimeEntity *obj);
 #endif
 #ifdef USE_DATETIME_DATETIME
-  void on_datetime_update(datetime::DateTimeEntity *obj) override;
-#endif
-#ifdef USE_LOCK
-  void on_lock_update(lock::Lock *obj) override;
-#endif
-#ifdef USE_VALVE
-  void on_valve_update(valve::Valve *obj) override;
+  void on_datetime_update(datetime::DateTimeEntity *obj);
 #endif
 #ifdef USE_MEDIA_PLAYER
-  void on_media_player_update(media_player::MediaPlayer *obj) override;
+  void on_media_player_update(media_player::MediaPlayer *obj);
 #endif
 #ifdef USE_ALARM_CONTROL_PANEL
   void on_alarm_control_panel_update(
-      alarm_control_panel::AlarmControlPanel *obj) override;
+      alarm_control_panel::AlarmControlPanel *obj);
 #endif
 #ifdef USE_EVENT
-  void on_event(event::Event *obj, const std::string &event_type) override;
+  void on_event(event::Event *obj);
 #endif
 #ifdef USE_UPDATE
-  void on_update(update::UpdateEntity *obj) override;
+  void on_update(update::UpdateEntity *obj);
+#endif
+#ifdef USE_WATER_HEATER
+  void on_water_heater_update(water_heater::WaterHeater *obj);
 #endif
 
 protected:
@@ -787,8 +782,9 @@ protected:
       std::string scoped_id =
           parent_->get_domain_scoped_id_("select", obj);
       uint32_t device_id = parent_->entity_device_id_(obj);
-      parent_->send_single_telemetry_(scoped_id, obj->state, device_id);
-      parent_->send_single_client_attribute_(scoped_id, obj->state, device_id);
+      std::string state = obj->current_option().str();
+      parent_->send_single_telemetry_(scoped_id, state, device_id);
+      parent_->send_single_client_attribute_(scoped_id, state, device_id);
       return true;
     }
 #endif
@@ -950,6 +946,12 @@ protected:
     // Skip button callbacks as they don't have state
 #ifdef USE_BUTTON
     bool on_button(button::Button *button) override { return true; }
+#endif
+#ifdef USE_WATER_HEATER
+    // Water heaters are not published yet.
+    bool on_water_heater(water_heater::WaterHeater *obj) override {
+      return true;
+    }
 #endif
 
     bool completed() {
