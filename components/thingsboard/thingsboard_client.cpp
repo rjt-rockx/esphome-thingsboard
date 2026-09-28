@@ -1239,7 +1239,7 @@ void ThingsBoardComponent::on_number_update(number::Number *obj) {
 void ThingsBoardComponent::on_select_update(select::Select *obj) {
   if (obj->is_internal() || !this->is_connected())
     return;
-  const std::string &state = obj->state;
+  std::string state = obj->current_option().str();
   size_t index = obj->active_index().value_or(0);
 
   ESP_LOGV(TAG, "Select '%s' updated: %s", obj->get_name().c_str(),
@@ -1296,11 +1296,11 @@ void ThingsBoardComponent::on_climate_update(climate::Climate *obj) {
 #endif
 
 #ifdef USE_TEXT
-void ThingsBoardComponent::on_text_update(text::Text *obj,
-                                          const std::string &state) {
+void ThingsBoardComponent::on_text_update(text::Text *obj) {
   if (obj->is_internal() || !this->is_connected())
     return;
 
+  const std::string &state = obj->state;
   std::string scoped_id = this->get_domain_scoped_id_("text", obj);
   uint32_t device_id = this->entity_device_id_(obj);
   this->send_single_telemetry_(scoped_id, state, device_id);
@@ -1386,10 +1386,11 @@ void ThingsBoardComponent::on_alarm_control_panel_update(
 #endif
 
 #ifdef USE_EVENT
-void ThingsBoardComponent::on_event(event::Event *obj,
-                                    const std::string &event_type) {
-  if (obj->is_internal() || !this->is_connected())
+void ThingsBoardComponent::on_event(event::Event *obj) {
+  if (obj->is_internal() || !this->is_connected() || !obj->has_event())
     return;
+
+  std::string event_type(obj->get_last_event_type().c_str());
 
   this->send_single_telemetry_(this->get_domain_scoped_id_("event", obj),
                                event_type, this->entity_device_id_(obj));
@@ -1406,6 +1407,13 @@ void ThingsBoardComponent::on_update(update::UpdateEntity *obj) {
                                update_available ? 1.0f : 0.0f,
                                this->entity_device_id_(obj));
 }
+#endif
+
+#ifdef USE_WATER_HEATER
+// Water heaters are not published to ThingsBoard yet. The empty callback
+// satisfies the controller contract so builds with a water_heater compile.
+void ThingsBoardComponent::on_water_heater_update(
+    water_heater::WaterHeater *obj) {}
 #endif
 
 void ThingsBoardComponent::process_initial_state_batch_() {
