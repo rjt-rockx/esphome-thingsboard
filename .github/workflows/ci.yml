@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        transport: [mqtt, mqtt.tls, http, gateway]
+        transport: [mqtt, mqtt.tls, http, gateway, entities]
     steps:
       - uses: actions/checkout@v4
 
@@ -23,8 +23,10 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install ESPHome
-        run: pip install -r requirements.txt
+      # Controller registration needs esphome #19588, which is only on dev
+      # until 2026.10.0 ships.
+      - name: Install ESPHome (dev)
+        run: pip install "esphome @ git+https://github.com/esphome/esphome@dev"
 
       - name: Compile test firmware
         run: esphome compile tests/test.${{ matrix.transport }}.yaml
