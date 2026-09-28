@@ -1,0 +1,171 @@
+# Compile-test config covering every entity type the core component
+# publishes. Codegen and C++ only; not intended to run against a broker.
+
+esphome:
+  name: tb-entities-test
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - thingsboard
+      - thingsboard_mqtt
+      - thingsboard_mqtt_ota
+
+logger:
+
+wifi:
+  ssid: "test"
+  password: "testtesttest"
+
+# Required transitively by the core component; declared here so the
+# consumer can pick the timeout. (Even MQTT-only firmware needs it
+# today, since the core uses esp_http_client for HTTP provisioning.)
+http_request:
+  id: tb_http
+  timeout: 10s
+
+thingsboard:
+  id: thingsboard_component
+  server_url: "https://demo.thingsboard.io"
+
+thingsboard_mqtt:
+  thingsboard_id: thingsboard_component
+  broker: "demo.thingsboard.io"
+  port: 1883
+  device_token: "0000000000000000000000000000"
+
+ota:
+  - platform: thingsboard_mqtt_ota
+    thingsboard_id: thingsboard_component
+    chunk_size: 4096
+  # Needed by the http_request update entity below.
+  - platform: http_request
+
+output:
+  - platform: template
+    id: out_light
+    type: binary
+    write_action: []
+  - platform: template
+    id: out_fan
+    type: float
+    write_action: []
+
+sensor:
+  - platform: template
+    name: "Sensor"
+    lambda: return 21.5;
+
+binary_sensor:
+  - platform: template
+    id: bin
+    name: "Binary sensor"
+    lambda: return true;
+
+text_sensor:
+  - platform: template
+    name: "Text sensor"
+    lambda: return {"x"};
+
+switch:
+  - platform: template
+    name: "Switch"
+    optimistic: true
+
+button:
+  - platform: template
+    name: "Button"
+
+number:
+  - platform: template
+    name: "Number"
+    min_value: 0
+    max_value: 10
+    step: 1
+    optimistic: true
+
+select:
+  - platform: template
+    name: "Select"
+    options: [a, b]
+    optimistic: true
+
+text:
+  - platform: template
+    name: "Text"
+    mode: text
+    optimistic: true
+
+light:
+  - platform: binary
+    name: "Light"
+    output: out_light
+
+fan:
+  - platform: speed
+    name: "Fan"
+    output: out_fan
+
+cover:
+  - platform: template
+    name: "Cover"
+    optimistic: true
+
+valve:
+  - platform: template
+    name: "Valve"
+    optimistic: true
+
+lock:
+  - platform: template
+    name: "Lock"
+    optimistic: true
+
+climate:
+  - platform: template
+    name: "Climate"
+    supported_modes: [HEAT]
+    visual:
+      min_temperature: 10
+      max_temperature: 30
+
+water_heater:
+  - platform: template
+    name: "Water heater"
+
+datetime:
+  - platform: template
+    name: "Date"
+    type: date
+    optimistic: true
+  - platform: template
+    name: "Time"
+    type: time
+    optimistic: true
+  - platform: template
+    name: "Datetime"
+    type: datetime
+    optimistic: true
+
+event:
+  - platform: template
+    name: "Event"
+    event_types: [pressed]
+
+alarm_control_panel:
+  - platform: template
+    name: "Alarm"
+    binary_sensors:
+      - input: bin
+
+update:
+  - platform: http_request
+    name: "Update"
+    source: "https://example.com/manifest.json"

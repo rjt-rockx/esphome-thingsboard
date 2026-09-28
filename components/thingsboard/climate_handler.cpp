@@ -101,7 +101,7 @@ void ClimateHandler::register_shared_attributes(register_fn reg) {
         float f = std::strtof(value.c_str(), &end);
         if (end == value.c_str() || !std::isfinite(f)) {
           ESP_LOGW(TAG, "Climate %s: ignoring non-numeric value '%s'",
-                   obj->get_object_id().c_str(), value.c_str());
+                   obj->get_name().c_str(), value.c_str());
           return;
         }
         auto call = obj->make_call();
