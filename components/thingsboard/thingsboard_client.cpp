@@ -40,8 +40,6 @@ void ThingsBoardComponent::initialize_component_() {
 void ThingsBoardComponent::setup() {
   ESP_LOGD(TAG, "Setting up ThingsBoard");
 
-  ControllerRegistry::register_controller(this);
-
   this->initialize_component_();
 
   // Device name precedence: explicit non-empty > explicit empty (server
