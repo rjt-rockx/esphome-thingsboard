@@ -85,7 +85,7 @@ void SelectHandler::append_entity_discovery(JsonArray arr) const {
 
 std::string SelectHandler::build_state_json(select::Select *obj) {
   return json::build_json([obj](JsonObject root) {
-    root["option"] = obj->state;
+    root["option"] = obj->current_option().str();
   });
 }
 

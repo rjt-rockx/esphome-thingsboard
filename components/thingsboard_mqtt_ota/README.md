@@ -33,12 +33,15 @@ Standard ESPHome OTA triggers (`on_begin` / `on_progress` / `on_end` /
 
 1. ThingsBoard pushes firmware metadata as shared attributes
    (`fw_title`, `fw_version`, `fw_size`, `fw_checksum`, `fw_checksum_algorithm`).
+   An advertisement whose `fw_title` differs from the project name is
+   reported `FAILED`; one whose `fw_version` equals the running project
+   version is reported `UPDATED` and nothing is downloaded.
 2. The component publishes chunk requests on
    `v2/fw/request/{request_id}/chunk/{chunk_index}` with a payload equal to
    the requested chunk size.
 3. The server responds on `v2/fw/response/{request_id}/chunk/{chunk_index}`
    with the binary payload. The platform writes each chunk to the next OTA
-   partition, verifies the SHA256, and reboots.
+   partition, verifies the checksum (SHA256 or MD5), and reboots.
 4. State transitions (`DOWNLOADING` → `DOWNLOADED` → `VERIFIED` → `UPDATING`
    → `UPDATED`, or `FAILED` with `fw_error`) are reported back as telemetry
    so ThingsBoard's firmware dashboard can track progress.
