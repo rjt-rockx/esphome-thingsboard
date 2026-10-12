@@ -77,13 +77,6 @@ switch:
     device_id: sub_relay_1
     optimistic: true
 
-# Required transitively by the core component; declared here so the
-# consumer can pick the timeout. (Even MQTT-only firmware needs it
-# today, since the core uses esp_http_client for HTTP provisioning.)
-http_request:
-  id: tb_http
-  timeout: 10s
-
 thingsboard:
   id: thingsboard_component
   server_url: "https://demo.thingsboard.io"

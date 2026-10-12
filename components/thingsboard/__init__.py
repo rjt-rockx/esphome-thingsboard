@@ -9,7 +9,9 @@ from esphome.components import http_request
 from esphome.core import CORE, coroutine_with_priority
 
 CODEOWNERS = ["@rjt-rockx"]
-DEPENDENCIES = ["wifi", "http_request"]
+# `network` rather than `wifi` so ethernet/modem builds work. http_request is
+# only needed for HTTP device provisioning (`http_request_id`).
+DEPENDENCIES = ["network"]
 AUTO_LOAD = ["json"]
 
 thingsboard_ns = cg.esphome_ns.namespace("thingsboard")
@@ -129,7 +131,9 @@ async def to_code(config):
     CORE.register_controller()
 
     if CONF_HTTP_REQUEST_ID in config:
-        await cg.register_parented(var, config[CONF_HTTP_REQUEST_ID])
+        http = await cg.get_variable(config[CONF_HTTP_REQUEST_ID])
+        cg.add_define("USE_THINGSBOARD_HTTP_PROVISIONING")
+        cg.add(var.set_http_request(http))
 
     cg.add(var.set_server_url(config[CONF_SERVER_URL]))
     cg.add(var.set_timeout(config[CONF_TIMEOUT]))

@@ -6,9 +6,6 @@
 #ifdef USE_THINGSBOARD_MQTT_TRANSPORT
 #include "esphome/components/thingsboard_mqtt/thingsboard_mqtt_transport.h"
 #endif
-#ifdef USE_WIFI
-#include "esphome/components/wifi/wifi_component.h"
-#endif
 #ifdef USE_NETWORK
 #include "esphome/components/network/util.h"
 #endif
@@ -136,9 +133,9 @@ void ThingsBoardComponent::loop() {
       !this->provisioning_in_progress_ &&
       (now - this->last_connection_attempt_ >
        this->connection_retry_interval_)) {
-#ifdef USE_WIFI
-    if (wifi::global_wifi_component != nullptr &&
-        wifi::global_wifi_component->is_connected()) {
+    // network::is_connected() covers wifi, ethernet, modem and openthread,
+    // so wired builds connect too.
+    if (network::is_connected()) {
       this->last_connection_attempt_ = now;
 
       if (!this->has_access_token() && this->device_token_.empty()) {
@@ -147,7 +144,7 @@ void ThingsBoardComponent::loop() {
 
       if (!this->has_access_token() && this->device_token_.empty()) {
         ESP_LOGD(TAG,
-                 "WiFi connected, starting ThingsBoard connection process");
+                 "Network connected, starting ThingsBoard connection process");
         this->establish_connection_();
       } else if (!this->is_connected()) {
 #ifdef USE_THINGSBOARD_MQTT_TRANSPORT
@@ -156,7 +153,6 @@ void ThingsBoardComponent::loop() {
 #endif
       }
     }
-#endif
   }
 
   if (this->provisioning_in_progress_) {
@@ -433,8 +429,15 @@ void ThingsBoardComponent::clear_device_token_() {
 }
 
 bool ThingsBoardComponent::provision_device_() {
-  ESP_LOGD(TAG, "Starting device provisioning via HTTP");
-  return this->provision_device_http_();
+#ifdef USE_THINGSBOARD_HTTP_PROVISIONING
+  if (this->http_request_ != nullptr) {
+    ESP_LOGD(TAG, "Starting device provisioning via HTTP");
+    return this->provision_device_http_();
+  }
+#endif
+  // No http_request_id configured: provision over the MQTT transport.
+  ESP_LOGD(TAG, "Starting device provisioning via MQTT");
+  return this->provision_device_mqtt_();
 }
 
 bool ThingsBoardComponent::provision_device_mqtt_() {
@@ -495,7 +498,11 @@ bool ThingsBoardComponent::provision_device_mqtt_() {
 }
 
 bool ThingsBoardComponent::provision_device_http_() {
-  if (this->get_parent() == nullptr) {
+#ifndef USE_THINGSBOARD_HTTP_PROVISIONING
+  ESP_LOGE(TAG, "HTTP provisioning needs http_request_id on thingsboard:");
+  return false;
+#else
+  if (this->http_request_ == nullptr) {
     ESP_LOGE(TAG, "HTTP request component not available");
     return false;
   }
@@ -519,7 +526,7 @@ bool ThingsBoardComponent::provision_device_http_() {
   headers.push_back({"Connection", "close"});
 
   this->provision_container_ =
-      this->get_parent()->post(provision_url, payload, headers);
+      this->http_request_->post(provision_url, payload, headers);
   if (!this->provision_container_) {
     ESP_LOGE(TAG, "Failed to start provisioning request");
     return false;
@@ -532,9 +539,11 @@ bool ThingsBoardComponent::provision_device_http_() {
   ESP_LOGV(TAG, "HTTP provisioning request started");
   // Completes asynchronously via check_provisioning_status_().
   return false;
+#endif
 }
 
 void ThingsBoardComponent::check_provisioning_status_() {
+#ifdef USE_THINGSBOARD_HTTP_PROVISIONING
   // MQTT provisioning completes via callback.
   if (!this->provisioning_in_progress_ || this->provisioning_via_mqtt_ ||
       !this->provision_container_) {
@@ -578,6 +587,7 @@ void ThingsBoardComponent::check_provisioning_status_() {
   this->provisioning_in_progress_ = false;
 
   this->handle_provision_response_(response);
+#endif
 }
 
 void ThingsBoardComponent::handle_provision_response_(

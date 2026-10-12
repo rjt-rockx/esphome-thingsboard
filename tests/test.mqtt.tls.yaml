@@ -25,6 +25,7 @@ wifi:
   ssid: "test"
   password: "testtesttest"
 
+# Optional on the core: enables HTTP device provisioning in an MQTT build.
 http_request:
   id: tb_http
   timeout: 10s
@@ -32,6 +33,7 @@ http_request:
 thingsboard:
   id: thingsboard_component
   server_url: "https://demo.thingsboard.io"
+  http_request_id: tb_http
 
 thingsboard_mqtt:
   thingsboard_id: thingsboard_component
