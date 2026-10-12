@@ -10,6 +10,7 @@
 
 #include "esphome/components/ota/ota_backend.h"
 #include "esphome/components/ota/ota_backend_factory.h"
+#include "esphome/components/sha256/sha256.h"
 #include "esphome/components/thingsboard/transport.h"
 #include "esphome/core/component.h"
 
@@ -75,6 +76,8 @@ class ThingsBoardMqttOtaComponent : public ota::OTAComponent,
   uint32_t next_chunk_idx_{0};
   size_t bytes_written_{0};
   uint32_t last_progress_report_{0};
+  // Set when the package checksum is SHA256; fed on the main loop per chunk.
+  std::unique_ptr<sha256::SHA256> sha256_;
 
   // Inbound chunks arrive on the MQTT client task (on_chunk_received). Flash
   // writes and the next-chunk request are handed to the main loop instead, so

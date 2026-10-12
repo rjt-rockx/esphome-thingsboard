@@ -107,15 +107,16 @@ void ThingsBoardComponent::dump_config() {
     ESP_LOGCONFIG(TAG, "  Rate Limits: Not yet received");
   }
   if (!this->claim_secret_key_.empty()) {
-    ESP_LOGCONFIG(TAG, "  Claim Secret Key: " LOG_SECRET("%s"),
-                  this->claim_secret_key_.c_str());
+    ESP_LOGCONFIG(TAG, "  Claim Secret Key: set (%u chars)",
+                  static_cast<unsigned>(this->claim_secret_key_.size()));
   }
   if (this->claim_duration_ms_ > 0) {
     ESP_LOGCONFIG(TAG, "  Claim Duration: %ums", this->claim_duration_ms_);
   }
   if (!this->device_token_.empty()) {
-    ESP_LOGCONFIG(TAG, "  Device Token: " LOG_SECRET("%s"),
-                  this->device_token_.c_str());
+    ESP_LOGCONFIG(TAG, "  Device Token: %.4s... (%u chars)",
+                  this->device_token_.c_str(),
+                  static_cast<unsigned>(this->device_token_.size()));
   } else {
     ESP_LOGCONFIG(TAG, "  Device Token: Not configured");
   }
@@ -475,7 +476,7 @@ bool ThingsBoardComponent::provision_device_mqtt_() {
     }
   });
 
-  ESP_LOGD(TAG, "Provisioning payload: %s", payload.c_str());
+  ESP_LOGD(TAG, "Provisioning payload: %u bytes", static_cast<unsigned>(payload.size()));
 
   // Connect with username="provision"; the actual request is published from
   // on_mqtt_connect_ once the broker is ready.
@@ -511,7 +512,7 @@ bool ThingsBoardComponent::provision_device_http_() {
   });
 
   ESP_LOGV(TAG, "Provisioning URL: %s", provision_url.c_str());
-  ESP_LOGV(TAG, "Provisioning payload: %s", payload.c_str());
+  ESP_LOGV(TAG, "Provisioning payload: %u bytes", static_cast<unsigned>(payload.size()));
 
   std::vector<http_request::Header> headers;
   headers.push_back({"Content-Type", "application/json"});
@@ -641,8 +642,8 @@ void ThingsBoardComponent::handle_provision_response_(
   this->save_device_token_(this->access_token_);
   this->provisioned_ = true;
 
-  ESP_LOGI(TAG, "Device provisioned successfully with token: %s",
-           this->access_token_.c_str());
+  ESP_LOGI(TAG, "Device provisioned successfully (token %u chars)",
+           static_cast<unsigned>(this->access_token_.size()));
 
   if (this->provisioning_via_mqtt_) {
 #ifdef USE_THINGSBOARD_MQTT_TRANSPORT
@@ -974,7 +975,7 @@ void ThingsBoardComponent::process_bootstrap_() {
           this->initial_state_iterator_ =
               std::make_unique<InitialStateIterator>(this);
         }
-        this->initial_state_iterator_->begin(/*include_internal=*/true);
+        this->initial_state_iterator_->begin(/*include_internal=*/false);
       }
       this->bootstrap_phase_ = BOOT_GW_REPLAY;
       break;
@@ -1241,7 +1242,7 @@ void ThingsBoardComponent::on_number_update(number::Number *obj) {
 void ThingsBoardComponent::on_select_update(select::Select *obj) {
   if (obj->is_internal() || !this->is_connected())
     return;
-  const std::string &state = obj->state;
+  std::string state = obj->current_option().str();
   size_t index = obj->active_index().value_or(0);
 
   ESP_LOGV(TAG, "Select '%s' updated: %s", obj->get_name().c_str(),
@@ -1298,11 +1299,11 @@ void ThingsBoardComponent::on_climate_update(climate::Climate *obj) {
 #endif
 
 #ifdef USE_TEXT
-void ThingsBoardComponent::on_text_update(text::Text *obj,
-                                          const std::string &state) {
+void ThingsBoardComponent::on_text_update(text::Text *obj) {
   if (obj->is_internal() || !this->is_connected())
     return;
 
+  const std::string &state = obj->state;
   std::string scoped_id = this->get_domain_scoped_id_("text", obj);
   uint32_t device_id = this->entity_device_id_(obj);
   this->send_single_telemetry_(scoped_id, state, device_id);
@@ -1388,10 +1389,11 @@ void ThingsBoardComponent::on_alarm_control_panel_update(
 #endif
 
 #ifdef USE_EVENT
-void ThingsBoardComponent::on_event(event::Event *obj,
-                                    const std::string &event_type) {
-  if (obj->is_internal() || !this->is_connected())
+void ThingsBoardComponent::on_event(event::Event *obj) {
+  if (obj->is_internal() || !this->is_connected() || !obj->has_event())
     return;
+
+  std::string event_type(obj->get_last_event_type().c_str());
 
   this->send_single_telemetry_(this->get_domain_scoped_id_("event", obj),
                                event_type, this->entity_device_id_(obj));
@@ -1408,6 +1410,13 @@ void ThingsBoardComponent::on_update(update::UpdateEntity *obj) {
                                update_available ? 1.0f : 0.0f,
                                this->entity_device_id_(obj));
 }
+#endif
+
+#ifdef USE_WATER_HEATER
+// Water heaters are not published to ThingsBoard yet. The empty callback
+// satisfies the controller contract so builds with a water_heater compile.
+void ThingsBoardComponent::on_water_heater_update(
+    water_heater::WaterHeater *obj) {}
 #endif
 
 void ThingsBoardComponent::process_initial_state_batch_() {
@@ -1826,11 +1835,13 @@ void ThingsBoardComponent::add_to_batch_(const std::string &key,
   // Per-key throttle: telemetry only; throttle gates new entries, but an
   // already-pending value still gets refreshed below.
   bool throttled = false;
+  uint32_t due = 0;
   if (!is_attribute && this->telemetry_throttle_ > 0) {
     auto throttle_it = this->last_key_send_.find(key);
     if (throttle_it != this->last_key_send_.end()) {
       uint32_t elapsed = now - throttle_it->second;
       throttled = (elapsed < this->telemetry_throttle_);
+      due = throttle_it->second + this->telemetry_throttle_;
     }
     if (!throttled) {
       this->last_key_send_[key] = now;
@@ -1855,12 +1866,18 @@ void ThingsBoardComponent::add_to_batch_(const std::string &key,
   if (it != this->pending_messages_.end()) {
     it->second.value = value;
     it->second.timestamp = now;
-  } else if (!throttled) {
+  } else {
     PendingMessage msg;
     msg.key = key;
     msg.value = value;
     msg.timestamp = now;
     msg.is_attribute = is_attribute;
+    if (throttled) {
+      // Defer to the end of the throttle window rather than drop the change.
+      msg.deferred = true;
+      msg.not_before = due;
+      this->last_key_send_[key] = due;
+    }
     this->pending_messages_[key] = msg;
 
     // T5: bounded offline queue. Drop oldest entry by timestamp when over cap.
@@ -1925,7 +1942,11 @@ void ThingsBoardComponent::process_partition_(bool is_attribute) {
   std::vector<std::string> keys;
   keys.reserve(this->pending_messages_.size());
   for (const auto &kv : this->pending_messages_) {
-    if (kv.second.is_attribute == is_attribute) keys.push_back(kv.first);
+    if (kv.second.is_attribute != is_attribute) continue;
+    if (kv.second.deferred &&
+        static_cast<int32_t>(now - kv.second.not_before) < 0)
+      continue;
+    keys.push_back(kv.first);
   }
   if (keys.empty()) return;
 
@@ -2096,11 +2117,10 @@ bool ThingsBoardComponent::claim_device(const std::string &secret_key,
     return false;
   }
 
-  this->claim_device_(secret_key, duration_ms);
-  return true;
+  return this->claim_device_(secret_key, duration_ms);
 }
 
-void ThingsBoardComponent::claim_device_(const std::string &secret_key,
+bool ThingsBoardComponent::claim_device_(const std::string &secret_key,
                                          uint32_t duration_ms) {
   // Per https://thingsboard.io/docs/reference/mqtt-api/#claiming-devices both
   // fields are optional; when omitted TB uses defaults.
@@ -2118,10 +2138,11 @@ void ThingsBoardComponent::claim_device_(const std::string &secret_key,
   bool success = this->transport_ != nullptr &&
                  this->transport_->publish_claim(payload);
   if (success) {
-    ESP_LOGD(TAG, "Device claim request sent: %s", payload.c_str());
+    ESP_LOGD(TAG, "Device claim request sent (duration %ums)", duration_ms);
   } else {
     ESP_LOGE(TAG, "Failed to send device claim request");
   }
+  return success;
 }
 
 bool ThingsBoardComponent::send_rpc_request(const std::string &method,

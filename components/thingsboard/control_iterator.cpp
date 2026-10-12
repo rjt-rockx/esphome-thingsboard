@@ -244,6 +244,11 @@ void ControlIterator::handle_shared_attributes(const std::map<std::string, std::
     if (it != this->attribute_handlers_.end()) {
       ESP_LOGD(TAG, "Processing shared attribute: %s = %s", attr.first.c_str(), attr.second.c_str());
       it->second(attr.second);
+    } else if (!this->command_prefix_.empty() &&
+               attr.first.compare(0, this->command_prefix_.size(),
+                                  this->command_prefix_) == 0) {
+      ESP_LOGW(TAG, "Ignoring %s: no public entity (internal or unknown)",
+               attr.first.c_str());
     }
   }
 }
