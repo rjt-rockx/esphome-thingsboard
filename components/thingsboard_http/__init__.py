@@ -66,7 +66,9 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(CONF_THINGSBOARD_ID): cv.use_id(
                 tb_core.ThingsBoardComponent
             ),
-            cv.Optional(CONF_HTTP_REQUEST_ID): cv.use_id(
+            # Defaults to the only http_request: component, so the transport
+            # never runs with a null client.
+            cv.GenerateID(CONF_HTTP_REQUEST_ID): cv.use_id(
                 http_request.HttpRequestComponent
             ),
             cv.Optional(CONF_DEVICE_TOKEN): cv.string,

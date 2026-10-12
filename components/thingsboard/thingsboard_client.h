@@ -777,7 +777,8 @@ protected:
 
 #ifdef USE_SELECT
     bool on_select(select::Select *obj) override {
-      if (obj->is_internal())
+      // No state yet: skip rather than report option 0 as selected.
+      if (obj->is_internal() || !obj->has_state())
         return true;
       std::string scoped_id =
           parent_->get_domain_scoped_id_("select", obj);
