@@ -35,7 +35,9 @@ Standard ESPHome OTA triggers (`on_begin` / `on_progress` / `on_end` /
    (`fw_title`, `fw_version`, `fw_size`, `fw_checksum`, `fw_checksum_algorithm`).
    An advertisement whose `fw_title` differs from the project name is
    reported `FAILED`; one whose `fw_version` equals the running project
-   version is reported `UPDATED` and nothing is downloaded.
+   version is reported `UPDATED` and nothing is downloaded. A package
+   whose checksum algorithm is neither `SHA256` nor `MD5` is reported
+   `FAILED` before anything is downloaded.
 2. The component publishes chunk requests on
    `v2/fw/request/{request_id}/chunk/{chunk_index}` with a payload equal to
    the requested chunk size.

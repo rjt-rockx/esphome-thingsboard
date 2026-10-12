@@ -439,9 +439,10 @@ bool ThingsBoardComponent::provision_device_() {
     return this->provision_device_http_();
   }
 #endif
-  // No http_request_id configured: provision over the MQTT transport.
-  ESP_LOGD(TAG, "Starting device provisioning via MQTT");
-  return this->provision_device_mqtt_();
+  // Config validation requires http_request_id whenever provisioning is
+  // configured, so this only runs if that check is bypassed.
+  ESP_LOGE(TAG, "Provisioning needs http_request_id on thingsboard:");
+  return false;
 }
 
 bool ThingsBoardComponent::provision_device_mqtt_() {

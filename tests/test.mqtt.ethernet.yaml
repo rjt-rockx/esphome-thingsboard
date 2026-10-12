@@ -1,6 +1,5 @@
 # Compile-test config for an MQTT-only build on wired ethernet: no wifi and
-# no http_request. Exercises the network-agnostic connect gate and the
-# provisioning path that falls back to MQTT when HTTP is not configured.
+# no http_request. Exercises the network-agnostic connect gate.
 
 esphome:
   name: tb-mqtt-eth-test
@@ -38,9 +37,7 @@ thingsboard_mqtt:
   thingsboard_id: thingsboard_component
   broker: "demo.thingsboard.io"
   port: 1883
-  provisioning:
-    key: "provision-key"
-    secret: "provision-secret"
+  device_token: "0000000000000000000000000000"
 
 ota:
   - platform: thingsboard_mqtt_ota

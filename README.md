@@ -25,8 +25,8 @@ surface and the implemented slice of the ThingsBoard device API.
 The core depends on ESPHome's `network` component, not `wifi`, so it runs over
 wifi, ethernet, modem or OpenThread. `http_request` is only needed by the HTTP
 transport, HTTP OTA, or HTTP device provisioning: set `http_request_id:` on
-`thingsboard:` (or on `thingsboard_http:`, which shares it with the core) to
-provision over HTTP. Without it, provisioning runs over the MQTT transport.
+`thingsboard:` (or on `thingsboard_http:`, which shares it with the core) when
+the transport block uses `provisioning:`; device provisioning runs over HTTP.
 
 ## Quick start: MQTT
 

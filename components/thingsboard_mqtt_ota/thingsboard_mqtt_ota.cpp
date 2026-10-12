@@ -104,6 +104,18 @@ void ThingsBoardMqttOtaComponent::on_firmware_advertised(
     return;
   }
 #endif
+  // Fail closed: never install an image whose advertised checksum we cannot
+  // check. MD5 goes through the OTA backend, SHA256 is hashed per chunk.
+  if (!info.checksum.empty() && info.checksum_algorithm != "MD5" &&
+      info.checksum_algorithm != "SHA256") {
+    ESP_LOGE(TAG, "Checksum algorithm %s not supported (use MD5 or SHA256)",
+             info.checksum_algorithm.c_str());
+    this->report_state_("FAILED",
+                        "Unsupported checksum algorithm " +
+                            info.checksum_algorithm,
+                        0);
+    return;
+  }
   this->fw_ = info;
   this->request_id_ = millis();
   this->next_chunk_idx_ = 0;
@@ -140,9 +152,6 @@ void ThingsBoardMqttOtaComponent::on_firmware_advertised(
   } else if (!info.checksum.empty() && info.checksum_algorithm == "SHA256") {
     this->sha256_ = std::make_unique<sha256::SHA256>();
     this->sha256_->init();
-  } else if (!info.checksum.empty()) {
-    ESP_LOGW(TAG, "Checksum algorithm %s not supported; image not verified",
-             info.checksum_algorithm.c_str());
   }
 
 #ifdef USE_OTA_STATE_LISTENER
