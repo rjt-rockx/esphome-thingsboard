@@ -110,9 +110,13 @@ void ThingsBoardComponent::dump_config() {
   if (this->claim_duration_ms_ > 0) {
     ESP_LOGCONFIG(TAG, "  Claim Duration: %ums", this->claim_duration_ms_);
   }
-  if (!this->device_token_.empty()) {
+  if (this->device_token_.size() > 4) {
     ESP_LOGCONFIG(TAG, "  Device Token: %.4s... (%u chars)",
                   this->device_token_.c_str(),
+                  static_cast<unsigned>(this->device_token_.size()));
+  } else if (!this->device_token_.empty()) {
+    // Too short for a prefix to hide anything: log the length only.
+    ESP_LOGCONFIG(TAG, "  Device Token: set (%u chars)",
                   static_cast<unsigned>(this->device_token_.size()));
   } else {
     ESP_LOGCONFIG(TAG, "  Device Token: Not configured");
@@ -1849,8 +1853,10 @@ void ThingsBoardComponent::add_to_batch_(const std::string &key,
   if (!is_attribute && this->telemetry_throttle_ > 0) {
     auto throttle_it = this->last_key_send_.find(key);
     if (throttle_it != this->last_key_send_.end()) {
-      uint32_t elapsed = now - throttle_it->second;
-      throttled = (elapsed < this->telemetry_throttle_);
+      // Signed: a deferred send stores its future deadline here, and an
+      // update before that deadline must stay throttled rather than wrap.
+      int32_t elapsed = static_cast<int32_t>(now - throttle_it->second);
+      throttled = (elapsed < static_cast<int32_t>(this->telemetry_throttle_));
       due = throttle_it->second + this->telemetry_throttle_;
     }
     if (!throttled) {

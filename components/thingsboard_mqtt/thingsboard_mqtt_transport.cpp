@@ -200,7 +200,7 @@ bool ThingsBoardMQTT::connect() {
            this->broker_host_.c_str(), this->broker_port_,
            this->tls_enabled_() ? "TLS" : "plaintext");
   // Token is a bearer credential: log only a prefix, at every level.
-  if (this->device_token_.size() >= 4) {
+  if (this->device_token_.size() > 4) {
     ESP_LOGI(TAG, "Using device token: %.4s... (%u chars)",
              this->device_token_.c_str(),
              static_cast<unsigned>(this->device_token_.size()));
