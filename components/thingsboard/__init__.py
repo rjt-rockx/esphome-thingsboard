@@ -1,6 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
+import esphome.final_validate as fv
 from esphome.const import (
     CONF_ID,
     CONF_TIMEOUT,
@@ -9,7 +10,9 @@ from esphome.components import http_request
 from esphome.core import CORE, coroutine_with_priority
 
 CODEOWNERS = ["@rjt-rockx"]
-DEPENDENCIES = ["wifi", "http_request"]
+# `network` rather than `wifi` so ethernet/modem builds work. http_request is
+# only needed for HTTP device provisioning (`http_request_id`).
+DEPENDENCIES = ["network"]
 AUTO_LOAD = ["json"]
 
 thingsboard_ns = cg.esphome_ns.namespace("thingsboard")
@@ -116,6 +119,17 @@ def _final_validate(config):
             "thingsboard: configure exactly one transport, got "
             f"{', '.join(transports)}. Pick MQTT or HTTP, not both."
         )
+    # Device provisioning runs over HTTP, so it needs an http_request
+    # component on the core or on the HTTP transport.
+    full = fv.full_config.get()
+    transport_conf = full.get(transports[0], {})
+    if "provisioning" in transport_conf and not (
+        CONF_HTTP_REQUEST_ID in config or CONF_HTTP_REQUEST_ID in transport_conf
+    ):
+        raise cv.Invalid(
+            f"{transports[0]}: `provisioning:` needs an `http_request:` "
+            "component; set `http_request_id:` on `thingsboard:`."
+        )
     return config
 
 
@@ -129,7 +143,9 @@ async def to_code(config):
     CORE.register_controller()
 
     if CONF_HTTP_REQUEST_ID in config:
-        await cg.register_parented(var, config[CONF_HTTP_REQUEST_ID])
+        http = await cg.get_variable(config[CONF_HTTP_REQUEST_ID])
+        cg.add_define("USE_THINGSBOARD_HTTP_PROVISIONING")
+        cg.add(var.set_http_request(http))
 
     cg.add(var.set_server_url(config[CONF_SERVER_URL]))
     cg.add(var.set_timeout(config[CONF_TIMEOUT]))

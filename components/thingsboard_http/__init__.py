@@ -18,7 +18,7 @@ from esphome.core import coroutine_with_priority
 from .. import thingsboard as tb_core
 
 CODEOWNERS = ["@rjt-rockx"]
-DEPENDENCIES = ["wifi", "thingsboard", "http_request"]
+DEPENDENCIES = ["network", "thingsboard", "http_request"]
 
 CONF_THINGSBOARD_ID = "thingsboard_id"
 CONF_HTTP_REQUEST_ID = "http_request_id"
@@ -66,7 +66,9 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(CONF_THINGSBOARD_ID): cv.use_id(
                 tb_core.ThingsBoardComponent
             ),
-            cv.Optional(CONF_HTTP_REQUEST_ID): cv.use_id(
+            # Defaults to the only http_request: component, so the transport
+            # never runs with a null client.
+            cv.GenerateID(CONF_HTTP_REQUEST_ID): cv.use_id(
                 http_request.HttpRequestComponent
             ),
             cv.Optional(CONF_DEVICE_TOKEN): cv.string,
@@ -98,6 +100,9 @@ async def to_code(config):
     if CONF_HTTP_REQUEST_ID in config:
         http = await cg.get_variable(config[CONF_HTTP_REQUEST_ID])
         cg.add(var.set_http(http))
+        # Lets the core provision over HTTP without a second http_request_id.
+        cg.add_define("USE_THINGSBOARD_HTTP_PROVISIONING")
+        cg.add(tb.set_http_request(http))
 
     if CONF_DEVICE_TOKEN in config:
         cg.add(var.set_device_token(config[CONF_DEVICE_TOKEN]))

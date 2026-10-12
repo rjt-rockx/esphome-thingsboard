@@ -19,7 +19,7 @@ from esphome.core import CORE, coroutine_with_priority
 from .. import thingsboard as tb_core
 
 CODEOWNERS = ["@rjt-rockx"]
-DEPENDENCIES = ["wifi", "thingsboard"]
+DEPENDENCIES = ["network", "thingsboard"]
 
 CONF_THINGSBOARD_ID = "thingsboard_id"
 CONF_DEVICE_TOKEN = "device_token"

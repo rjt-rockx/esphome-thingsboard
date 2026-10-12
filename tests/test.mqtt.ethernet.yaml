@@ -1,0 +1,44 @@
+# Compile-test config for an MQTT-only build on wired ethernet: no wifi and
+# no http_request. Exercises the network-agnostic connect gate.
+
+esphome:
+  name: tb-mqtt-eth-test
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - thingsboard
+      - thingsboard_mqtt
+      - thingsboard_mqtt_ota
+
+logger:
+
+ethernet:
+  type: LAN8720
+  mdc_pin: GPIO23
+  mdio_pin: GPIO18
+  clk:
+    pin: GPIO17
+    mode: CLK_OUT
+  phy_addr: 0
+
+thingsboard:
+  id: thingsboard_component
+  server_url: "https://demo.thingsboard.io"
+
+thingsboard_mqtt:
+  thingsboard_id: thingsboard_component
+  broker: "demo.thingsboard.io"
+  port: 1883
+  device_token: "0000000000000000000000000000"
+
+ota:
+  - platform: thingsboard_mqtt_ota
+    thingsboard_id: thingsboard_component

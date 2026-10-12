@@ -1,9 +1,11 @@
 #pragma once
 
+#include "esphome/core/defines.h"
 #include "control_iterator.h"
+#ifdef USE_THINGSBOARD_HTTP_PROVISIONING
 #include "esphome/components/http_request/http_request.h"
+#endif
 #include "esphome/components/json/json_util.h"
-#include "esphome/components/wifi/wifi_component.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/component_iterator.h"
@@ -36,10 +38,7 @@ namespace thingsboard {
 // public header.
 class ThingsBoardMQTT;
 
-class ThingsBoardComponent
-    : public Component,
-      public Controller,
-      public Parented<http_request::HttpRequestComponent> {
+class ThingsBoardComponent : public Component, public Controller {
 public:
   ThingsBoardComponent();
   ~ThingsBoardComponent();
@@ -51,6 +50,13 @@ public:
     return setup_priority::WIFI - 1.0f;
   }
 
+#ifdef USE_THINGSBOARD_HTTP_PROVISIONING
+  // Optional: only HTTP device provisioning uses it. MQTT-only builds leave
+  // http_request out entirely.
+  void set_http_request(http_request::HttpRequestComponent *http) {
+    http_request_ = http;
+  }
+#endif
   void set_server_url(const std::string &server_url) {
     server_url_ = server_url;
   }
@@ -339,7 +345,7 @@ public:
   void on_valve_update(valve::Valve *obj) override;
 #endif
 #ifdef USE_TEXT
-  void on_text_update(text::Text *obj, const std::string &state) override;
+  void on_text_update(text::Text *obj) override;
 #endif
 #ifdef USE_DATETIME_DATE
   void on_date_update(datetime::DateEntity *obj) override;
@@ -350,12 +356,6 @@ public:
 #ifdef USE_DATETIME_DATETIME
   void on_datetime_update(datetime::DateTimeEntity *obj) override;
 #endif
-#ifdef USE_LOCK
-  void on_lock_update(lock::Lock *obj) override;
-#endif
-#ifdef USE_VALVE
-  void on_valve_update(valve::Valve *obj) override;
-#endif
 #ifdef USE_MEDIA_PLAYER
   void on_media_player_update(media_player::MediaPlayer *obj) override;
 #endif
@@ -364,10 +364,13 @@ public:
       alarm_control_panel::AlarmControlPanel *obj) override;
 #endif
 #ifdef USE_EVENT
-  void on_event(event::Event *obj, const std::string &event_type) override;
+  void on_event(event::Event *obj) override;
 #endif
 #ifdef USE_UPDATE
   void on_update(update::UpdateEntity *obj) override;
+#endif
+#ifdef USE_WATER_HEATER
+  void on_water_heater_update(water_heater::WaterHeater *obj) override;
 #endif
 
 protected:
@@ -413,7 +416,10 @@ protected:
   bool provisioning_in_progress_{false};
   bool provisioning_via_mqtt_{false};
   uint32_t provisioning_start_time_{0};
+#ifdef USE_THINGSBOARD_HTTP_PROVISIONING
+  http_request::HttpRequestComponent *http_request_{nullptr};
   std::shared_ptr<http_request::HttpContainer> provision_container_{nullptr};
+#endif
 
   uint32_t last_connection_attempt_{0};
   // Reconnect backoff. A publish burst that trips ThingsBoard's per-device rate
@@ -523,6 +529,9 @@ protected:
     std::string value;
     uint32_t timestamp;
     bool is_attribute;
+    // Throttled telemetry is held until this time instead of being dropped.
+    bool deferred{false};
+    uint32_t not_before{0};
   };
   std::map<std::string, PendingMessage> pending_messages_;
   uint32_t last_batch_process_{0};
@@ -646,7 +655,7 @@ protected:
   void send_error_status_(const std::string &message,
                           const std::string &error_code = "");
 
-  void claim_device_(const std::string &secret_key, uint32_t duration_ms);
+  bool claim_device_(const std::string &secret_key, uint32_t duration_ms);
 
   uint32_t rpc_request_counter_{0};
   uint32_t attribute_request_counter_{0};
@@ -695,15 +704,8 @@ protected:
     bool on_sensor(sensor::Sensor *obj) override {
       char id_buf[OBJECT_ID_MAX_LEN];
       auto id = obj->get_object_id_to(id_buf);
-      ESP_LOGD("thingsboard",
-               "InitialStateIterator: on_sensor called for %s (internal=%s)",
-               id.c_str(), obj->is_internal() ? "true" : "false");
-      if (obj->is_internal()) {
-        ESP_LOGD("thingsboard",
-                 "InitialStateIterator: sensor %s is internal, still sending "
-                 "for completeness",
-                 id.c_str());
-      }
+      if (obj->is_internal())
+        return true;
       ESP_LOGD("thingsboard", "Initial state: sensor %s = %.2f", id.c_str(),
                obj->state);
       if (!std::isnan(obj->state)) {
@@ -730,15 +732,8 @@ protected:
     bool on_switch(switch_::Switch *obj) override {
       char id_buf[OBJECT_ID_MAX_LEN];
       auto id = obj->get_object_id_to(id_buf);
-      ESP_LOGD("thingsboard",
-               "InitialStateIterator: on_switch called for %s (internal=%s)",
-               id.c_str(), obj->is_internal() ? "true" : "false");
-      if (obj->is_internal()) {
-        ESP_LOGD("thingsboard",
-                 "InitialStateIterator: switch %s is internal, still sending "
-                 "for completeness",
-                 id.c_str());
-      }
+      if (obj->is_internal())
+        return true;
       ESP_LOGD("thingsboard", "Initial state: switch %s = %s", id.c_str(),
                obj->state ? "ON" : "OFF");
       std::string scoped_id =
@@ -782,13 +777,17 @@ protected:
 
 #ifdef USE_SELECT
     bool on_select(select::Select *obj) override {
-      if (obj->is_internal())
+      // No state yet: skip rather than report option 0 as selected.
+      if (obj->is_internal() || !obj->has_state())
         return true;
       std::string scoped_id =
           parent_->get_domain_scoped_id_("select", obj);
       uint32_t device_id = parent_->entity_device_id_(obj);
-      parent_->send_single_telemetry_(scoped_id, obj->state, device_id);
-      parent_->send_single_client_attribute_(scoped_id, obj->state, device_id);
+      std::string state = obj->current_option().str();
+      parent_->send_single_telemetry_(
+          scoped_id, static_cast<float>(obj->active_index().value_or(0)),
+          device_id);
+      parent_->send_single_client_attribute_(scoped_id, state, device_id);
       return true;
     }
 #endif
@@ -950,6 +949,12 @@ protected:
     // Skip button callbacks as they don't have state
 #ifdef USE_BUTTON
     bool on_button(button::Button *button) override { return true; }
+#endif
+#ifdef USE_WATER_HEATER
+    // Water heaters are not published yet.
+    bool on_water_heater(water_heater::WaterHeater *obj) override {
+      return true;
+    }
 #endif
 
     bool completed() {

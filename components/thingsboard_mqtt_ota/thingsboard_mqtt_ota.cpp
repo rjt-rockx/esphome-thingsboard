@@ -61,6 +61,9 @@ void ThingsBoardMqttOtaComponent::loop() {
     progress = static_cast<int>(100.0f * this->bytes_written_ / this->fw_.size);
   }
   this->report_state_("DOWNLOADING", "Download in progress", progress);
+#ifdef USE_OTA_STATE_LISTENER
+  this->notify_state_(ota::OTA_IN_PROGRESS, static_cast<float>(progress), 0);
+#endif
 }
 
 void ThingsBoardMqttOtaComponent::dump_config() {
@@ -81,6 +84,36 @@ void ThingsBoardMqttOtaComponent::on_firmware_advertised(
   }
   if (this->transport_ == nullptr) {
     ESP_LOGE(TAG, "No MQTT transport bound; cannot start OTA");
+    return;
+  }
+#ifdef ESPHOME_PROJECT_NAME
+  if (info.title != ESPHOME_PROJECT_NAME) {
+    ESP_LOGW(TAG, "Ignoring firmware %s v%s: title does not match %s",
+             info.title.c_str(), info.version.c_str(), ESPHOME_PROJECT_NAME);
+    this->report_fw_info_();
+    this->report_state_("FAILED", "Firmware title mismatch", 0);
+    return;
+  }
+#endif
+#ifdef ESPHOME_PROJECT_VERSION
+  if (info.version == ESPHOME_PROJECT_VERSION) {
+    ESP_LOGI(TAG, "Already running firmware %s v%s", info.title.c_str(),
+             info.version.c_str());
+    this->report_fw_info_();
+    this->report_state_("UPDATED", "", -1);
+    return;
+  }
+#endif
+  // Fail closed: never install an image whose advertised checksum we cannot
+  // check. MD5 goes through the OTA backend, SHA256 is hashed per chunk.
+  if (!info.checksum.empty() && info.checksum_algorithm != "MD5" &&
+      info.checksum_algorithm != "SHA256") {
+    ESP_LOGE(TAG, "Checksum algorithm %s not supported (use MD5 or SHA256)",
+             info.checksum_algorithm.c_str());
+    this->report_state_("FAILED",
+                        "Unsupported checksum algorithm " +
+                            info.checksum_algorithm,
+                        0);
     return;
   }
   this->fw_ = info;
@@ -113,10 +146,17 @@ void ThingsBoardMqttOtaComponent::on_firmware_advertised(
     this->fail_("OTA backend begin failed");
     return;
   }
+  this->sha256_.reset();
   if (!info.checksum.empty() && info.checksum_algorithm == "MD5") {
     this->backend_->set_update_md5(info.checksum.c_str());
+  } else if (!info.checksum.empty() && info.checksum_algorithm == "SHA256") {
+    this->sha256_ = std::make_unique<sha256::SHA256>();
+    this->sha256_->init();
   }
 
+#ifdef USE_OTA_STATE_LISTENER
+  this->notify_state_deferred_(ota::OTA_STARTED, 0.0f, 0);
+#endif
   this->report_fw_info_();
   this->state_ = OTA_REQUESTING;
   this->report_state_("DOWNLOADING", "Requesting first chunk", 0);
@@ -192,6 +232,8 @@ void ThingsBoardMqttOtaComponent::process_pending_chunk_() {
   ota::OTAResponseTypes write_result = ota::OTA_RESPONSE_OK;
   if (len > 0) {
     write_result = this->backend_->write(this->chunk_buf_.get(), len);
+    if (write_result == ota::OTA_RESPONSE_OK && this->sha256_)
+      this->sha256_->add(this->chunk_buf_.get(), len);
   }
   // Release the buffer before requesting the next chunk so the MQTT task may
   // refill it the moment the next response lands.
@@ -217,6 +259,16 @@ void ThingsBoardMqttOtaComponent::finish_() {
   this->chunk_ready_ = false;
   this->chunk_buf_.reset();
   this->chunk_buf_cap_ = 0;
+  if (this->sha256_) {
+    this->sha256_->calculate();
+    bool ok = this->sha256_->equals_hex(this->fw_.checksum.c_str());
+    this->sha256_.reset();
+    if (!ok) {
+      this->fail_("Checksum verification failed");
+      return;
+    }
+    ESP_LOGI(TAG, "SHA256 verified");
+  }
   this->state_ = OTA_VERIFIED;
   if (!this->fw_.checksum.empty()) {
     this->report_state_("VERIFIED", "Firmware checksum verified", 100);
@@ -236,6 +288,9 @@ void ThingsBoardMqttOtaComponent::finish_() {
   }
   this->state_ = OTA_DONE;
   this->report_state_("UPDATED", "Firmware update completed", 100);
+#ifdef USE_OTA_STATE_LISTENER
+  this->notify_state_deferred_(ota::OTA_COMPLETED, 100.0f, 0);
+#endif
   this->defer("mqtt-ota-restart", [this]() {
     ESP_LOGI(TAG, "Rebooting after MQTT OTA");
     App.safe_reboot();
@@ -249,11 +304,15 @@ void ThingsBoardMqttOtaComponent::abort() {
   this->chunk_ready_ = false;
   this->chunk_buf_.reset();
   this->chunk_buf_cap_ = 0;
+  this->sha256_.reset();
   if (this->backend_) {
     this->backend_->abort();
   }
   this->state_ = OTA_FAILED;
   this->report_state_("FAILED", "OTA aborted", 0);
+#ifdef USE_OTA_STATE_LISTENER
+  this->notify_state_deferred_(ota::OTA_ERROR, 0.0f, 0);
+#endif
   this->state_ = OTA_IDLE;
 }
 
@@ -262,11 +321,15 @@ void ThingsBoardMqttOtaComponent::fail_(const std::string &reason) {
   this->chunk_ready_ = false;
   this->chunk_buf_.reset();
   this->chunk_buf_cap_ = 0;
+  this->sha256_.reset();
   if (this->backend_) {
     this->backend_->abort();
   }
   this->state_ = OTA_FAILED;
   this->report_state_("FAILED", reason, 0);
+#ifdef USE_OTA_STATE_LISTENER
+  this->notify_state_deferred_(ota::OTA_ERROR, 0.0f, 0);
+#endif
   this->state_ = OTA_IDLE;
 }
 
