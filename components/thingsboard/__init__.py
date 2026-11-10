@@ -6,6 +6,7 @@ from esphome.const import (
     CONF_TIMEOUT,
 )
 from esphome.components import http_request
+import esphome.core
 from esphome.core import CORE, coroutine_with_priority
 
 CODEOWNERS = ["@rjt-rockx"]
@@ -126,7 +127,12 @@ FINAL_VALIDATE_SCHEMA = _final_validate
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
-    CORE.register_controller()
+    # ESPHome 2026.10 registers controllers at codegen; 2026.9 at runtime.
+    if hasattr(esphome.core, "KEY_CONTROLLER_REGISTRY_CONTROLLERS"):
+        CORE.register_controller(var)
+    else:
+        CORE.register_controller()
+        cg.add_define("USE_THINGSBOARD_CONTROLLER_BASE")
 
     if CONF_HTTP_REQUEST_ID in config:
         await cg.register_parented(var, config[CONF_HTTP_REQUEST_ID])

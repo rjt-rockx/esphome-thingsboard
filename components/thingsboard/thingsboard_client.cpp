@@ -2,7 +2,9 @@
 #include <cstdlib>
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
+#ifdef USE_THINGSBOARD_CONTROLLER_BASE
 #include "esphome/core/controller_registry.h"
+#endif
 #ifdef USE_THINGSBOARD_MQTT_TRANSPORT
 #include "esphome/components/thingsboard_mqtt/thingsboard_mqtt_transport.h"
 #endif
@@ -40,7 +42,9 @@ void ThingsBoardComponent::initialize_component_() {
 void ThingsBoardComponent::setup() {
   ESP_LOGD(TAG, "Setting up ThingsBoard");
 
+#ifdef USE_THINGSBOARD_CONTROLLER_BASE
   ControllerRegistry::register_controller(this);
+#endif
 
   this->initialize_component_();
 
